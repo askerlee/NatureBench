@@ -18,11 +18,13 @@ def planner(monkeypatch):
     class FakeBackend:
         def __init__(self, *args, **kwargs):
             self.calls = []
+            self.options = []
             self.responses = ["method", "architecture", "dependencies", "configuration",
                               json.dumps({"files": {"run.py": "print('solution')\n"}})]
 
         def respond(self, messages, **kwargs):
             self.calls.append([dict(message) for message in messages])
+            self.options.append(dict(kwargs))
             return self.responses.pop(0), 10, 20
 
     monkeypatch.setattr("agent.backend.base_backend.LLMBackend", FakeBackend)
@@ -47,6 +49,206 @@ def test_stages_keep_context_and_write_solution(planner, tmp_path):
     assert result["prompt_tokens"] == 50
     assert result["completion_tokens"] == 100
     assert len(json.loads((tmp_path / ".planning/trajectory.json").read_text())) == 5
+
+
+def test_plan_only_cli_writes_plan_without_implementation(planner, tmp_path, monkeypatch):
+    import plan_task
+
+    problem = tmp_path / "problem"
+    problem.mkdir()
+    (problem / "README.md").write_text("Predict held-out values")
+    (problem / "data_description.md").write_text("Separate training and test data")
+    output = tmp_path / "plans" / "PLAN.md"
+    monkeypatch.setattr(plan_task, "PlanningAgent", lambda *args, **kwargs: planner)
+    monkeypatch.setattr("sys.argv", [
+        "plan_task.py", "--problem-dir", str(problem), "--output", str(output),
+    ])
+    plan_task.main()
+    assert len(planner.backend.calls) == 4
+    assert len(planner.backend.responses) == 1
+    assert "Recommend scientific methods, model families" in planner.backend.calls[0][0]["content"]
+    assert {"role": "assistant", "content": "method"} in planner.backend.calls[-1]
+    plan = output.read_text()
+    for stage in ("Methodology", "Architecture", "Dependencies", "Configuration"):
+        assert f"| {stage} " in plan
+    assert f"| {tmp_path.name} | OK | method | architecture | dependencies | configuration |" in plan
+    assert sorted(path.relative_to(tmp_path).as_posix() for path in tmp_path.rglob("*")
+                  if path.is_file()) == [
+        "plans/PLAN.md", "problem/README.md", "problem/data_description.md",
+    ]
+
+
+@pytest.mark.parametrize("model, parameter", [
+    ("gpt-6.1-sol", "max_completion_tokens"),
+    ("gpt-4.1", "max_completion_tokens"),
+    ("claude-test", "max_tokens"),
+    ("deepseek-chat", "max_tokens"),
+])
+def test_plan_only_uses_supported_token_parameter(planner, tmp_path, model, parameter):
+    from plan_task import generate_plan
+
+    planner.model_name = model
+    generate_plan(planner, task(tmp_path), max_tokens=2048)
+    assert planner.backend.options == [{parameter: 2048}] * 4
+
+
+def test_plan_only_stage_logs_include_usage_without_prompt(planner, tmp_path, capsys):
+    from plan_task import generate_plan
+
+    generate_plan(planner, task(tmp_path, task_description="private-task-content"))
+    logs = capsys.readouterr().err
+    assert "Stage 1/4 methodology: requesting model=gpt-test" in logs
+    assert "Stage 4/4 configuration: completed in" in logs
+    assert "prompt_tokens=10, completion_tokens=20" in logs
+    assert "private-task-content" not in logs
+
+
+def test_plan_only_heartbeat_reports_wait_and_stops(monkeypatch, capsys):
+    import threading
+    import plan_task
+
+    reported = threading.Event()
+    original_progress = plan_task.progress
+
+    def capture_progress(message):
+        original_progress(message)
+        reported.set()
+
+    monkeypatch.setattr(plan_task, "progress", capture_progress)
+    with plan_task.report_wait("Stage 1/4 methodology", 0.01):
+        assert reported.wait(timeout=2)
+    logs = capsys.readouterr().err
+    assert "still waiting for model" in logs
+    assert "request or backend retries in progress" in logs
+
+
+def test_plan_only_stage_failure_logs_elapsed_time(planner, tmp_path, monkeypatch, capsys):
+    from plan_task import generate_plan
+
+    def fail_call(*args, **kwargs):
+        raise RuntimeError("Model unavailable")
+
+    monkeypatch.setattr(planner, "call_model", fail_call)
+    with pytest.raises(RuntimeError, match="Model unavailable"):
+        generate_plan(planner, task(tmp_path))
+    logs = capsys.readouterr().err
+    assert "Stage 1/4 methodology: failed after" in logs
+    assert "(RuntimeError)" in logs
+    assert "Stage 2/4" not in logs
+
+
+def test_plan_only_cli_requires_paper_before_model_call(tmp_path, monkeypatch):
+    import plan_task
+
+    monkeypatch.setattr("sys.argv", [
+        "plan_task.py", "--problem-dir", str(tmp_path), "--mode", "reproduce",
+    ])
+    with pytest.raises(SystemExit) as error:
+        plan_task.main()
+    assert error.value.code == 2
+
+
+def test_plan_only_reproduce_includes_paper(planner, tmp_path):
+    from plan_task import generate_plan
+
+    planner.mode = "reproduce"
+    plan = generate_plan(planner, task(tmp_path, paper_content="Use an exact global solve"))
+    prompt = planner.backend.calls[0][0]["content"]
+    assert "Use an exact global solve" in prompt
+    assert "rather than proposing replacements" in prompt
+    assert plan == {"methodology": "method", "architecture": "architecture",
+                    "dependencies": "dependencies", "configuration": "configuration"}
+    assert len(planner.backend.calls) == 4
+    assert not list(tmp_path.iterdir())
+
+
+def test_plan_only_batch_table_is_sorted_and_context_is_isolated(planner, tmp_path, monkeypatch):
+    import plan_task
+
+    tasks = tmp_path / "tasks"
+    for name in ("beta", "alpha"):
+        problem = tasks / name / "problem"
+        problem.mkdir(parents=True)
+        (problem / "README.md").write_text(f"Task {name}")
+        (problem / "data_description.md").write_text("Separate training and test data")
+    planner.backend.responses = ["method | A\nnext <step>", "architecture", "dependencies",
+                                 "configuration", "method B", "architecture", "dependencies",
+                                 "configuration"]
+    output = tmp_path / "plans.md"
+    monkeypatch.setattr(plan_task, "PlanningAgent", lambda *args, **kwargs: planner)
+    monkeypatch.setattr("sys.argv", [
+        "plan_task.py", "--tasks-dir", str(tasks), "--output", str(output),
+    ])
+    plan_task.main()
+    assert len(planner.backend.calls) == 8
+    assert len(planner.backend.calls[4]) == 2
+    assert "Task beta" in planner.backend.calls[4][0]["content"]
+    assert "Task alpha" not in planner.backend.calls[4][0]["content"]
+    lines = output.read_text().splitlines()
+    rows = [line for line in lines if line.startswith(("| alpha |", "| beta |"))]
+    assert len(rows) == 2
+    assert "method &#124; A<br>next &lt;step&gt;" in rows[0]
+    assert all(row.count("|") == 7 for row in rows)
+    assert not list(tasks.rglob("run.py"))
+
+
+@pytest.mark.parametrize("failure", ["missing-data", "model-error"])
+def test_plan_only_batch_records_failure_and_continues(planner, tmp_path, monkeypatch, failure):
+    import plan_task
+
+    tasks = tmp_path / "tasks"
+    for name in ("bad", "good"):
+        problem = tasks / name / "problem"
+        problem.mkdir(parents=True)
+        (problem / "README.md").write_text(name)
+    (tasks / "good" / "problem" / "data_description.md").write_text("Data")
+    if failure == "model-error":
+        (tasks / "bad" / "problem" / "data_description.md").write_text("Data")
+        original_generate = plan_task.generate_plan
+
+        def generate_with_failure(agent, task_values, **kwargs):
+            if task_values["task_description"] == "bad":
+                raise RuntimeError("Model unavailable")
+            return original_generate(agent, task_values, **kwargs)
+
+        monkeypatch.setattr(plan_task, "generate_plan", generate_with_failure)
+    output = tmp_path / "plans.md"
+    monkeypatch.setattr(plan_task, "PlanningAgent", lambda *args, **kwargs: planner)
+    monkeypatch.setattr("sys.argv", [
+        "plan_task.py", "--tasks-dir", str(tasks), "--output", str(output),
+    ])
+    with pytest.raises(SystemExit) as error:
+        plan_task.main()
+    assert error.value.code == 1
+    table = output.read_text()
+    assert "| bad | ERROR:" in table
+    assert "| good | OK | method |" in table
+    assert len(planner.backend.calls) == 4
+
+
+def test_plan_only_batch_reproduce_uses_each_tasks_paper(planner, tmp_path, monkeypatch):
+    import plan_task
+
+    planner.mode = "reproduce"
+    planner.backend.responses = ["method", "architecture", "dependencies", "configuration"] * 2
+    tasks = tmp_path / "tasks"
+    for name in ("alpha", "beta"):
+        problem = tasks / name / "problem"
+        problem.mkdir(parents=True)
+        (problem / "README.md").write_text(name)
+        (problem / "data_description.md").write_text("Data")
+        (problem / "paper.md").write_text(f"Paper for {name}")
+    output = tmp_path / "plans.md"
+    monkeypatch.setattr(plan_task, "PlanningAgent", lambda *args, **kwargs: planner)
+    monkeypatch.setattr("sys.argv", [
+        "plan_task.py", "--tasks-dir", str(tasks), "--mode", "reproduce",
+        "--paper-name", "problem/paper.md", "--output", str(output),
+    ])
+    plan_task.main()
+    assert "Paper for alpha" in planner.backend.calls[0][0]["content"]
+    assert "Paper for beta" in planner.backend.calls[4][0]["content"]
+    assert "Paper for alpha" not in planner.backend.calls[4][0]["content"]
+    assert "Mode: reproduce" in output.read_text()
 
 
 def test_reproduce_requires_paper_and_preserves_fidelity(planner, tmp_path):

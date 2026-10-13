@@ -83,7 +83,56 @@ is still the hard limit, including backend request retries.
 
 For programmatic generation without execution, import `PlanningAgent` from
 `agent.planning` and call `solve_task()` with `workspace_path`, `task_description`,
-and `data_description`; reproduce mode also requires `paper_content`.
+and `data_description`; reproduce mode also requires `paper_content`. This still
+generates implementation files, not just a plan.
+
+### Plan Only
+
+To generate plans for a folder of tasks, run the standalone script from the
+repository root:
+
+```bash
+python plan_task.py \
+  --tasks-dir /path/to/tasks \
+  --model gpt-4.1 \
+  --output ./plans.md
+```
+
+Tasks are discovered in sorted order as `<tasks-dir>/<task-id>/problem/`.
+Each problem directory must contain `README.md` and `data_description.md`.
+Tasks run sequentially with four staged LLM calls each, retaining context within
+a task but not across tasks. The output is one Markdown table with columns for
+task ID, status, methodology, architecture, dependencies, and configuration.
+Plans include recommended scientific methods, model families, libraries,
+hyperparameters, compute requirements, and validation checks. The script does not
+generate solution files, execute code, inspect datasets, or contact the evaluation
+service. Docker and evaluation services are not required; the existing backend's
+`openai` and `backoff` dependencies and API credentials are required.
+
+For batch paper reproduction, add `--mode reproduce`. By default each task's
+paper is read from `<task-id>/paper.md`; use `--paper-name problem/paper.md` or
+another task-relative path for a different layout. A missing or empty paper is
+recorded as a failed task rather than silently falling back to base mode.
+Single-task use remains available with `--problem-dir /path/to/task/problem`;
+single-task reproduce mode requires `--paper-path /path/to/paper.md`.
+
+The table is saved after every task. Failures appear in the status column and
+do not prevent subsequent tasks from being processed; the script exits with
+status 1 if any task fails. Rerunning overwrites the table and replans all tasks.
+`--time-limit-minutes` sets each proposed solution's compute budget,
+not a timeout for plan generation. `--max-tokens` sets each stage's token budget.
+For GPT models it is sent as `max_completion_tokens` and includes reasoning
+tokens; Claude and DeepSeek gateways receive `max_tokens`.
+`--output` defaults to `plans.md` and overwrites an existing file at that path.
+Model names and API endpoint settings follow the backend rules above; `--model`
+selects the planner LLM, not the scientific model recommended in the plan.
+
+Timestamped progress is flushed to stderr: input sizes, stage starts/completions,
+call duration, token usage, task duration, and table saves. While a call is
+pending, a heartbeat reports elapsed time every 15 seconds (adjust with
+`--heartbeat-seconds`). A heartbeat indicates a pending call, not proof of
+server-side progress; it may include backend retry waits. Add `--debug` to print
+tracebacks for failed tasks. Prompts and responses are not dumped to the logs.
 
 Focused tests (no API credentials, Docker, or benchmark data required):
 
