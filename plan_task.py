@@ -60,7 +60,11 @@ def generate_plan(
     *,
     max_tokens: int = 4096,
     heartbeat_seconds: float = 15,
+    stages: int = len(PLANNING_STAGES),
 ) -> Dict[str, str]:
+    if not 1 <= stages <= len(PLANNING_STAGES):
+        raise ValueError(f"stages must be between 1 and {len(PLANNING_STAGES)}")
+    selected_stages = PLANNING_STAGES[:stages]
     messages = [{
         "role": "system",
         "content": planner.build_system_prompt(task) + "\n\n" + PLAN_ONLY_GUIDANCE,
@@ -68,9 +72,9 @@ def generate_plan(
     sections = {}
     token_parameter = ("max_completion_tokens" if planner.model_name.startswith("gpt")
                        else "max_tokens")
-    for index, (stage, instruction) in enumerate(PLANNING_STAGES, start=1):
+    for index, (stage, instruction) in enumerate(selected_stages, start=1):
         messages.append({"role": "user", "content": instruction})
-        label = f"Stage {index}/{len(PLANNING_STAGES)} {stage}"
+        label = f"Stage {index}/{len(selected_stages)} {stage}"
         prompt_chars = sum(len(message["content"]) for message in messages)
         progress(f"{label}: requesting model={planner.model_name}, "
                  f"messages={len(messages)}, prompt_chars={prompt_chars}, "
@@ -94,8 +98,15 @@ def table_cell(value: str) -> str:
     ).replace("\n", "<br>")
 
 
-def write_table(output: Path, rows: list[Dict[str, str]], model: str, mode: str) -> None:
-    columns = ["task", "status", *(stage for stage, _ in PLANNING_STAGES)]
+def write_table(
+    output: Path,
+    rows: list[Dict[str, str]],
+    model: str,
+    mode: str,
+    *,
+    stages: int = len(PLANNING_STAGES),
+) -> None:
+    columns = ["task", "status", *(stage for stage, _ in PLANNING_STAGES[:stages])]
     lines = [
         "# Task Plans", "", f"Planner model: {table_cell(model)}<br>Mode: {mode}", "",
         "| " + " | ".join(column.title() for column in columns) + " |",
@@ -127,6 +138,10 @@ def main() -> None:
                         help="Compute budget for the proposed solution, not this script.")
     parser.add_argument("--max-tokens", type=int, default=4096,
                         help="Token budget per stage (includes reasoning tokens for GPT models).")
+    parser.add_argument("--stages", type=int, choices=range(1, len(PLANNING_STAGES) + 1),
+                        default=len(PLANNING_STAGES),
+                        help="Run only the first M stages (default: %(default)s). "
+                             "Order: methodology, architecture, dependencies, configuration.")
     parser.add_argument("--heartbeat-seconds", type=float, default=15,
                         help="Interval for model-wait progress messages (default: %(default)s).")
     parser.add_argument("--debug", action="store_true",
@@ -152,7 +167,8 @@ def main() -> None:
     else:
         problems = [args.problem_dir]
     progress(f"Discovered {len(problems)} tasks; model={args.model}, mode={args.mode}, "
-             f"token_budget={args.max_tokens}, heartbeat={args.heartbeat_seconds}s, "
+             f"stages={args.stages}, token_budget={args.max_tokens}, "
+             f"heartbeat={args.heartbeat_seconds}s, "
              f"output={args.output}")
     progress("Initializing LLM backend")
     planner = PlanningAgent(args.model, mode=args.mode, backend_kwargs={"max_retries": 0})
@@ -180,7 +196,8 @@ def main() -> None:
                      f"data_chars={len(task['data_description'])}, "
                      f"paper_chars={len(task.get('paper_content', ''))}")
             row.update(generate_plan(planner, task, max_tokens=args.max_tokens,
-                                     heartbeat_seconds=args.heartbeat_seconds))
+                                     heartbeat_seconds=args.heartbeat_seconds,
+                                     stages=args.stages))
         except Exception as error:
             failed += 1
             row["status"] = f"ERROR: {error}"
@@ -188,7 +205,7 @@ def main() -> None:
             if args.debug:
                 traceback.print_exc(file=sys.stderr)
         rows.append(row)
-        write_table(args.output, rows, args.model, args.mode)
+        write_table(args.output, rows, args.model, args.mode, stages=args.stages)
         progress(f"{task_id}: elapsed={time.monotonic() - task_started:.1f}s; "
                  f"table saved to {args.output} ({len(rows)} rows)")
     print(f"Saved {len(rows) - failed} plans; {failed} failed. Table: {args.output}", flush=True)

@@ -78,6 +78,49 @@ def test_plan_only_cli_writes_plan_without_implementation(planner, tmp_path, mon
     ]
 
 
+@pytest.mark.parametrize("stages", [1, 2, 3, 4])
+def test_plan_only_cli_limits_stages_and_table_columns(planner, tmp_path, monkeypatch,
+                                                     capsys, stages):
+    import plan_task
+
+    problem = tmp_path / "problem"
+    problem.mkdir()
+    (problem / "README.md").write_text("Task")
+    (problem / "data_description.md").write_text("Data")
+    output = tmp_path / "plans.md"
+    monkeypatch.setattr(plan_task, "PlanningAgent", lambda *args, **kwargs: planner)
+    monkeypatch.setattr("sys.argv", [
+        "plan_task.py", "--problem-dir", str(problem), "--output", str(output),
+        "--stages", str(stages),
+    ])
+    plan_task.main()
+    assert len(planner.backend.calls) == stages
+    table = output.read_text()
+    for index, (stage, _) in enumerate(plan_task.PLANNING_STAGES):
+        assert (f"| {stage.title()} " in table) == (index < stages)
+    logs = capsys.readouterr().err
+    assert f"Stage {stages}/{stages}" in logs
+    assert f"Stage {stages + 1}/" not in logs
+    if stages >= 2:
+        assert {"role": "assistant", "content": "method"} in planner.backend.calls[1]
+
+
+@pytest.mark.parametrize("stages", [0, -1, 5])
+def test_plan_only_cli_rejects_invalid_stage_count(tmp_path, monkeypatch, stages):
+    import plan_task
+
+    def unexpected_backend(*args, **kwargs):
+        pytest.fail("Invalid stage count must be rejected before backend initialization")
+
+    monkeypatch.setattr(plan_task, "PlanningAgent", unexpected_backend)
+    monkeypatch.setattr("sys.argv", [
+        "plan_task.py", "--problem-dir", str(tmp_path), "--stages", str(stages),
+    ])
+    with pytest.raises(SystemExit) as error:
+        plan_task.main()
+    assert error.value.code == 2
+
+
 @pytest.mark.parametrize("model, parameter", [
     ("gpt-6.1-sol", "max_completion_tokens"),
     ("gpt-4.1", "max_completion_tokens"),

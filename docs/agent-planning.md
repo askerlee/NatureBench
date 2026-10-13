@@ -103,6 +103,10 @@ Each problem directory must contain `README.md` and `data_description.md`.
 Tasks run sequentially with four staged LLM calls each, retaining context within
 a task but not across tasks. The output is one Markdown table with columns for
 task ID, status, methodology, architecture, dependencies, and configuration.
+Use `--stages M` to run only the first M stages (1 through 4; default 4), in this
+order: methodology, architecture, dependencies, configuration. For example,
+`--stages 2` makes two calls per task and includes only methodology and
+architecture columns alongside task ID and status in the table.
 Plans include recommended scientific methods, model families, libraries,
 hyperparameters, compute requirements, and validation checks. The script does not
 generate solution files, execute code, inspect datasets, or contact the evaluation
