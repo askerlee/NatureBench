@@ -95,7 +95,7 @@ MAX_BYTES_PER_PY_FILE = MAX_BYTES_PER_SOURCE_FILE
 MAX_PY_FILES = MAX_SOURCE_FILES
 
 # --- Default model and endpoints ---
-DEFAULT_JUDGE_MODEL = "gpt-5.5"
+DEFAULT_JUDGE_MODEL = "gpt-6.1-sol"
 DEFAULT_ANTHROPIC_BASE_URL = "https://www.dmxapi.cn"
 DEFAULT_OPENAI_BASE_URL = "https://api.openai.com"
 DEFAULT_TIMEOUT = 600

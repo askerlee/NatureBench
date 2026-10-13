@@ -10,6 +10,7 @@ from .codex import CodexAgent
 from .claude import ClaudeAgent
 from .gemini import GeminiAgent
 from . import lumen_adapter  # noqa: F401  (registers the Lumen adapter on import)
+from . import planning_adapter
 
 __all__ = ["BaseAgent", "DummyAgent", "CodexAgent", "ClaudeAgent", "GeminiAgent"]
 

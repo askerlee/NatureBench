@@ -1,0 +1,175 @@
+{
+  "case_id": "s41467-025-63418-x",
+  "task_name": "Spatial Multi-Omics Domain Identification",
+  "paper_title": "MultiGATE: integrative analysis and regulatory inference in spatial multi-omics data via graph representation learning",
+  "paper_doi": "10.1038/s41467-025-63418-x",
+  "domain": "Cellular Omics"
+}
+{
+  "case_id": "s41587-024-02414-w",
+  "task_name": "Yeast Promoter Expression Prediction",
+  "paper_title": "A community effort to optimize sequence-based deep learning models of gene regulation",
+  "paper_doi": "10.1038/s41587-024-02414-w",
+  "domain": "Cellular Omics"
+}
+{
+  "case_id": "s41587-024-02428-4",
+  "task_name": "Protein-Protein Interaction Interface Residue Prediction",
+  "paper_title": "A structurally informed human protein-protein interactome reveals proteome-wide perturbations caused by disease mutations",
+  "paper_doi": "10.1038/s41587-024-02428-4",
+  "domain": "Protein Biology"
+}
+{
+  "case_id": "s41592-022-01709-7",
+  "task_name": "Cross-Modal Single-Cell Protein Data Matching",
+  "paper_title": "Robust single-cell matching and multimodal analysis using shared and distinct features",
+  "paper_doi": "10.1038/s41592-022-01709-7",
+  "domain": "Cellular Omics"
+}
+{
+  "case_id": "s41592-023-02124-2",
+  "task_name": "Tissue Cellular Neighborhood Detection",
+  "paper_title": "Unsupervised and supervised discovery of tissue cellular neighborhoods from cell phenotypes",
+  "paper_doi": "10.1038/s41592-023-02124-2",
+  "domain": "Cellular Omics"
+}
+{
+  "case_id": "s41592-024-02316-4",
+  "task_name": "Spatial Domain Identification from Multi-Omics Data",
+  "paper_title": "Deciphering spatial domains from spatial multi-omics with SpatialGlue",
+  "paper_doi": "10.1038/s41592-024-02316-4",
+  "domain": "Cellular Omics"
+}
+{
+  "case_id": "s41592-025-02662-x",
+  "task_name": "Fluorescence Microscopy Spot Detection",
+  "paper_title": "Spotiflow: accurate and efficient spot detection for fluorescence microscopy with deep stereographic flow regression",
+  "paper_doi": "10.1038/s41592-025-02662-x",
+  "domain": "Biomedical Modeling"
+}
+{
+  "case_id": "s41592-025-02665-8",
+  "task_name": "Temporal Segmentation of Single-Particle Diffusion Trajectories",
+  "paper_title": "Deep learning-assisted analysis of single-particle tracking for automated correlation between diffusion and function",
+  "paper_doi": "10.1038/s41592-025-02665-8",
+  "domain": "Biomedical Modeling"
+}
+{
+  "case_id": "s41592-025-02776-2",
+  "task_name": "Protein Variant Effect Prediction",
+  "paper_title": "Biophysics-based protein language models for protein engineering",
+  "paper_doi": "10.1038/s41592-025-02776-2",
+  "domain": "Protein Biology"
+}
+{
+  "case_id": "s41592-025-02924-8",
+  "task_name": "Clone Tree Site Labeling for Metastatic Migration History Inference",
+  "paper_title": "Inferring cancer type-specific patterns of metastatic spread using Metient",
+  "paper_doi": "10.1038/s41592-025-02924-8",
+  "domain": "Cellular Omics"
+}
+{
+  "case_id": "s41592-025-02983-x",
+  "task_name": "Cell Behavior Prediction in Multicellular Embryogenesis",
+  "paper_title": "MultiCell: geometric learning in multicellular development",
+  "paper_doi": "10.1038/s41592-025-02983-x",
+  "domain": "Cellular Omics"
+}
+{
+  "case_id": "s42256-022-00447-x",
+  "task_name": "Molecular Property Prediction",
+  "paper_title": "Molecular contrastive learning of representations via graph neural networks",
+  "paper_doi": "10.1038/s42256-022-00447-x",
+  "domain": "Molecular Design"
+}
+{
+  "case_id": "s42256-022-00541-0",
+  "task_name": "Clinical Drug Response Prediction from Cell-Line Screens",
+  "paper_title": "A context-aware deconfounding autoencoder for robust prediction of personalized clinical drug response from cell-line compound screening",
+  "paper_doi": "10.1038/s42256-022-00541-0",
+  "domain": "Biomedical Modeling"
+}
+{
+  "case_id": "s42256-023-00627-3",
+  "task_name": "Metabolomic Profile Prediction from Microbial Composition",
+  "paper_title": "Predicting metabolomic profiles from microbial composition through neural ordinary differential equations",
+  "paper_doi": "10.1038/s42256-023-00627-3",
+  "domain": "Cellular Omics"
+}
+{
+  "case_id": "s42256-023-00628-2",
+  "task_name": "Metal-Organic Framework Property Prediction",
+  "paper_title": "A multi-modal pre-training transformer for universal transfer learning in metal-organic frameworks",
+  "paper_doi": "10.1038/s42256-023-00628-2",
+  "domain": "Physical Modeling"
+}
+{
+  "case_id": "s42256-023-00630-8",
+  "task_name": "Visual Abstract Reasoning on Progressive Matrices",
+  "paper_title": "A neuro-vector-symbolic architecture for solving Raven's progressive matrices",
+  "paper_doi": "10.1038/s42256-023-00630-8",
+  "domain": "Relational Reasoning"
+}
+{
+  "case_id": "s42256-023-00639-z",
+  "task_name": "Molecular and Protein Property Prediction",
+  "paper_title": "Regression Transformer enables concurrent sequence regression and generation for molecular language modelling",
+  "paper_doi": "10.1038/s42256-023-00639-z",
+  "domain": "Molecular Design"
+}
+{
+  "case_id": "s42256-023-00654-0",
+  "task_name": "Molecular Property Prediction",
+  "paper_title": "Knowledge graph-enhanced molecular contrastive learning with functional prompt",
+  "paper_doi": "10.1038/s42256-023-00654-0",
+  "domain": "Molecular Design"
+}
+{
+  "case_id": "s42256-024-00790-1",
+  "task_name": "X-ray Diffraction Data Denoising",
+  "paper_title": "Weak signal extraction enabled by deep neural network denoising of diffraction data",
+  "paper_doi": "10.1038/s42256-024-00790-1",
+  "domain": "Physical Modeling"
+}
+{
+  "case_id": "s42256-024-00892-w",
+  "task_name": "Neuron Segmentation and Activity Trace Extraction from Calcium Imaging Data",
+  "paper_title": "An end-to-end recurrent compressed sensing method to denoise, detect and demix calcium imaging data",
+  "paper_doi": "10.1038/s42256-024-00892-w",
+  "domain": "Biomedical Modeling"
+}
+{
+  "case_id": "s42256-025-01042-6",
+  "task_name": "Inverse Protein Folding",
+  "paper_title": "Mask-prior-guided denoising diffusion improves inverse protein folding",
+  "paper_doi": "10.1038/s42256-025-01042-6",
+  "domain": "Protein Biology"
+}
+{
+  "case_id": "s43588-024-00698-1",
+  "task_name": "Genetic Perturbation Outcome Prediction",
+  "paper_title": "Toward subtask-decomposition-based learning and benchmarking for predicting genetic perturbation outcomes and beyond",
+  "paper_doi": "10.1038/s43588-024-00698-1",
+  "domain": "Cellular Omics"
+}
+{
+  "case_id": "s43588-024-00733-1",
+  "task_name": "Protein Essentiality Prediction",
+  "paper_title": "Comprehensive prediction and analysis of human protein essentiality based on a pretrained large language model",
+  "paper_doi": "10.1038/s43588-024-00733-1",
+  "domain": "Protein Biology"
+}
+{
+  "case_id": "s43588-025-00903-9",
+  "task_name": "Polymer Property Prediction",
+  "paper_title": "Periodicity-aware deep learning for polymers",
+  "paper_doi": "10.1038/s43588-025-00903-9",
+  "domain": "Physical Modeling"
+}
+{
+  "case_id": "s43588-025-00917-3",
+  "task_name": "Upconverting Nanoparticle Emission Intensity Prediction",
+  "paper_title": "Gradient-based optimization of complex nanoparticle heterostructures enabled by deep learning on heterogeneous graphs",
+  "paper_doi": "10.1038/s43588-025-00917-3",
+  "domain": "Physical Modeling"
+}

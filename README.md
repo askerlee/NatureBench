@@ -147,6 +147,10 @@ python run_naturebench.py
 
 The built-in `--agent` options are `claude`, `codex`, and `gemini`; to run your own agent on NatureBench instead, see [`docs/custom-agents.md`](docs/custom-agents.md).
 
+A local [`planning` agent](docs/agent-planning.md) also provides staged scientific
+planning, multi-file implementation, and execution/evaluation-driven repair via
+an OpenAI-compatible backend. Select it with `--agent planning`.
+
 ### Evaluation Setup
 
 For comparability, our reported runs use the following setup:
