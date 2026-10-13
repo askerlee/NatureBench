@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
 from datetime import datetime
 import html
@@ -75,6 +76,8 @@ def generate_plan(
     for index, (stage, instruction) in enumerate(selected_stages, start=1):
         messages.append({"role": "user", "content": instruction})
         label = f"Stage {index}/{len(selected_stages)} {stage}"
+        if task.get("task_id"):
+            label = f"{task['task_id']}: {label}"
         prompt_chars = sum(len(message["content"]) for message in messages)
         progress(f"{label}: requesting model={planner.model_name}, "
                  f"messages={len(messages)}, prompt_chars={prompt_chars}, "
@@ -119,6 +122,48 @@ def write_table(
     output.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def plan_problem(
+    problem: Path,
+    args: argparse.Namespace,
+    index: int,
+    total: int,
+) -> Dict[str, str]:
+    task_id = problem.parent.name if problem.name == "problem" else problem.name
+    print(f"[{index}/{total}] Planning {task_id}", flush=True)
+    task_started = time.monotonic()
+    progress(f"{task_id}: reading task documentation from {problem}")
+    row = {"task": task_id, "status": "OK"}
+    try:
+        task = {
+            "task_id": task_id,
+            "task_description": (problem / "README.md").read_text(encoding="utf-8"),
+            "data_description": (problem / "data_description.md").read_text(encoding="utf-8"),
+            "time_limit_minutes": args.time_limit_minutes,
+        }
+        if args.mode == "reproduce":
+            paper = (problem.parent / args.paper_name
+                     if args.tasks_dir is not None else args.paper_path)
+            task["paper_content"] = paper.read_text(encoding="utf-8")
+            if not task["paper_content"].strip():
+                raise ValueError(f"Paper must contain nonempty text: {paper}")
+        progress(f"{task_id}: loaded task_chars={len(task['task_description'])}, "
+                 f"data_chars={len(task['data_description'])}, "
+                 f"paper_chars={len(task.get('paper_content', ''))}")
+        progress(f"{task_id}: initializing LLM backend")
+        planner = PlanningAgent(args.model, mode=args.mode, backend_kwargs={"max_retries": 0})
+        row.update(generate_plan(planner, task, max_tokens=args.max_tokens,
+                                 heartbeat_seconds=args.heartbeat_seconds,
+                                 stages=args.stages))
+    except Exception as error:
+        row["status"] = f"ERROR: {error}"
+        progress(f"{task_id}: {type(error).__name__}: {error}")
+        if args.debug:
+            traceback.print_exc(file=sys.stderr)
+    progress(f"{task_id}: elapsed={time.monotonic() - task_started:.1f}s; "
+             f"status={row['status']}")
+    return row
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     inputs = parser.add_mutually_exclusive_group(required=True)
@@ -142,6 +187,8 @@ def main() -> None:
                         default=len(PLANNING_STAGES),
                         help="Run only the first M stages (default: %(default)s). "
                              "Order: methodology, architecture, dependencies, configuration.")
+    parser.add_argument("--workers", type=int, default=5,
+                        help="Maximum number of tasks planned concurrently (default: %(default)s).")
     parser.add_argument("--heartbeat-seconds", type=float, default=15,
                         help="Interval for model-wait progress messages (default: %(default)s).")
     parser.add_argument("--debug", action="store_true",
@@ -151,6 +198,8 @@ def main() -> None:
         parser.error("--time-limit-minutes and --max-tokens must be positive")
     if args.heartbeat_seconds <= 0:
         parser.error("--heartbeat-seconds must be positive")
+    if args.workers <= 0:
+        parser.error("--workers must be positive")
     if args.tasks_dir is not None and args.paper_path is not None:
         parser.error("Use --paper-name for batch reproduction, not --paper-path")
     if args.paper_name.is_absolute() or ".." in args.paper_name.parts:
@@ -167,48 +216,26 @@ def main() -> None:
     else:
         problems = [args.problem_dir]
     progress(f"Discovered {len(problems)} tasks; model={args.model}, mode={args.mode}, "
-             f"stages={args.stages}, token_budget={args.max_tokens}, "
+             f"workers={args.workers}, stages={args.stages}, token_budget={args.max_tokens}, "
              f"heartbeat={args.heartbeat_seconds}s, "
              f"output={args.output}")
-    progress("Initializing LLM backend")
-    planner = PlanningAgent(args.model, mode=args.mode, backend_kwargs={"max_retries": 0})
-    rows = []
+    completed = {}
     failed = 0
-    for index, problem in enumerate(problems, start=1):
-        task_id = problem.parent.name if problem.name == "problem" else problem.name
-        print(f"[{index}/{len(problems)}] Planning {task_id}", flush=True)
-        task_started = time.monotonic()
-        progress(f"{task_id}: reading task documentation from {problem}")
-        row = {"task": task_id, "status": "OK"}
-        try:
-            task = {
-                "task_description": (problem / "README.md").read_text(encoding="utf-8"),
-                "data_description": (problem / "data_description.md").read_text(encoding="utf-8"),
-                "time_limit_minutes": args.time_limit_minutes,
-            }
-            if args.mode == "reproduce":
-                paper = (problem.parent / args.paper_name
-                         if args.tasks_dir is not None else args.paper_path)
-                task["paper_content"] = paper.read_text(encoding="utf-8")
-                if not task["paper_content"].strip():
-                    raise ValueError(f"Paper must contain nonempty text: {paper}")
-            progress(f"{task_id}: loaded task_chars={len(task['task_description'])}, "
-                     f"data_chars={len(task['data_description'])}, "
-                     f"paper_chars={len(task.get('paper_content', ''))}")
-            row.update(generate_plan(planner, task, max_tokens=args.max_tokens,
-                                     heartbeat_seconds=args.heartbeat_seconds,
-                                     stages=args.stages))
-        except Exception as error:
-            failed += 1
-            row["status"] = f"ERROR: {error}"
-            progress(f"{task_id}: {type(error).__name__}: {error}")
-            if args.debug:
-                traceback.print_exc(file=sys.stderr)
-        rows.append(row)
-        write_table(args.output, rows, args.model, args.mode, stages=args.stages)
-        progress(f"{task_id}: elapsed={time.monotonic() - task_started:.1f}s; "
-                 f"table saved to {args.output} ({len(rows)} rows)")
-    print(f"Saved {len(rows) - failed} plans; {failed} failed. Table: {args.output}", flush=True)
+    with ThreadPoolExecutor(max_workers=args.workers) as executor:
+        futures = {
+            executor.submit(plan_problem, problem, args, index, len(problems)): index
+            for index, problem in enumerate(problems, start=1)
+        }
+        for future in as_completed(futures):
+            row = future.result()
+            completed[futures[future]] = row
+            if row["status"] != "OK":
+                failed += 1
+            rows = [completed[index] for index in sorted(completed)]
+            write_table(args.output, rows, args.model, args.mode, stages=args.stages)
+            progress(f"{row['task']}: table saved to {args.output} "
+                     f"({len(rows)}/{len(problems)} tasks completed)")
+    print(f"Saved {len(completed) - failed} plans; {failed} failed. Table: {args.output}", flush=True)
     if failed:
         raise SystemExit(1)
 

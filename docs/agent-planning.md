@@ -100,8 +100,13 @@ python plan_task.py \
 
 Tasks are discovered in sorted order as `<tasks-dir>/<task-id>/problem/`.
 Each problem directory must contain `README.md` and `data_description.md`.
-Tasks run sequentially with four staged LLM calls each, retaining context within
-a task but not across tasks. The output is one Markdown table with columns for
+Tasks run sequentially by default. Use `--workers N` to plan up to N tasks in
+parallel, for example `--workers 4 --stages 2`. Each task has its own planner
+and API client; its stages still run sequentially, retaining context within
+a task but not across tasks. Start with a small worker count to stay within
+your provider's concurrent-request and token rate limits. Parallelism does not
+reduce the total number of model calls or tokens requested.
+The output is one Markdown table with columns for
 task ID, status, methodology, architecture, dependencies, and configuration.
 Use `--stages M` to run only the first M stages (1 through 4; default 4), in this
 order: methodology, architecture, dependencies, configuration. For example,
@@ -120,7 +125,10 @@ recorded as a failed task rather than silently falling back to base mode.
 Single-task use remains available with `--problem-dir /path/to/task/problem`;
 single-task reproduce mode requires `--paper-path /path/to/paper.md`.
 
-The table is saved after every task. Failures appear in the status column and
+The table is saved by the main thread after every completed task, keeping rows
+in task discovery order even when requests complete out of order. Stage and
+heartbeat logs include task IDs so concurrent requests can be distinguished.
+Failures appear in the status column and
 do not prevent subsequent tasks from being processed; the script exits with
 status 1 if any task fails. Rerunning overwrites the table and replans all tasks.
 `--time-limit-minutes` sets each proposed solution's compute budget,

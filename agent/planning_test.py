@@ -235,8 +235,10 @@ def test_plan_only_batch_table_is_sorted_and_context_is_isolated(planner, tmp_pa
     assert not list(tasks.rglob("run.py"))
 
 
+@pytest.mark.parametrize("workers", [1, 2])
 @pytest.mark.parametrize("failure", ["missing-data", "model-error"])
-def test_plan_only_batch_records_failure_and_continues(planner, tmp_path, monkeypatch, failure):
+def test_plan_only_batch_records_failure_and_continues(planner, tmp_path, monkeypatch,
+                                                     failure, workers):
     import plan_task
 
     tasks = tmp_path / "tasks"
@@ -259,6 +261,7 @@ def test_plan_only_batch_records_failure_and_continues(planner, tmp_path, monkey
     monkeypatch.setattr(plan_task, "PlanningAgent", lambda *args, **kwargs: planner)
     monkeypatch.setattr("sys.argv", [
         "plan_task.py", "--tasks-dir", str(tasks), "--output", str(output),
+        "--workers", str(workers),
     ])
     with pytest.raises(SystemExit) as error:
         plan_task.main()
@@ -267,6 +270,93 @@ def test_plan_only_batch_records_failure_and_continues(planner, tmp_path, monkey
     assert "| bad | ERROR:" in table
     assert "| good | OK | method |" in table
     assert len(planner.backend.calls) == 4
+
+
+def test_plan_only_parallel_tasks_are_bounded_and_table_has_one_writer(tmp_path, monkeypatch,
+                                                                     capsys):
+    import threading
+    import plan_task
+
+    tasks = tmp_path / "tasks"
+    names = ["alpha", "beta", "delta", "gamma"]
+    for name in names:
+        problem = tasks / name / "problem"
+        problem.mkdir(parents=True)
+        (problem / "README.md").write_text(name)
+        (problem / "data_description.md").write_text("Data")
+    barrier = threading.Barrier(2)
+    lock = threading.Lock()
+    agents = []
+    active = 0
+    peak = 0
+
+    class ConcurrentPlanner:
+        def __init__(self, model, **kwargs):
+            self.model_name = model
+            self.calls = []
+            with lock:
+                agents.append(self)
+
+        def build_system_prompt(self, task_values):
+            self.task_id = task_values["task_id"]
+            return task_values["task_description"]
+
+        def call_model(self, messages, **kwargs):
+            nonlocal active, peak
+            self.calls.append([dict(message) for message in messages])
+            with lock:
+                active += 1
+                peak = max(peak, active)
+            try:
+                barrier.wait(timeout=5)
+            finally:
+                with lock:
+                    active -= 1
+            return f"{self.task_id} stage {len(self.calls)}", 10, 20, 0.01
+
+    main_thread = threading.get_ident()
+    snapshots = []
+    original_write = plan_task.write_table
+
+    def record_write(output, rows, *args, **kwargs):
+        assert threading.get_ident() == main_thread
+        snapshots.append([row["task"] for row in rows])
+        original_write(output, rows, *args, **kwargs)
+
+    output = tmp_path / "plans.md"
+    monkeypatch.setattr(plan_task, "PlanningAgent", ConcurrentPlanner)
+    monkeypatch.setattr(plan_task, "write_table", record_write)
+    monkeypatch.setattr("sys.argv", [
+        "plan_task.py", "--tasks-dir", str(tasks), "--workers", "2", "--stages", "2",
+        "--output", str(output),
+    ])
+    plan_task.main()
+    assert peak == 2
+    assert len(agents) == 4
+    assert sorted(agent.task_id for agent in agents) == names
+    for agent in agents:
+        assert len(agent.calls) == 2
+        assert {"role": "assistant", "content": f"{agent.task_id} stage 1"} in agent.calls[1]
+    assert [len(snapshot) for snapshot in snapshots] == [1, 2, 3, 4]
+    assert all(snapshot == sorted(snapshot) for snapshot in snapshots)
+    assert snapshots[-1] == names
+    table = output.read_text()
+    assert all(f"| {name} | OK | {name} stage 1 | {name} stage 2 |" in table for name in names)
+    logs = capsys.readouterr().err
+    assert "alpha: Stage 1/2 methodology" in logs
+    assert "beta: Stage 1/2 methodology" in logs
+
+
+@pytest.mark.parametrize("workers", [0, -1])
+def test_plan_only_rejects_invalid_worker_count(tmp_path, monkeypatch, workers):
+    import plan_task
+
+    monkeypatch.setattr("sys.argv", [
+        "plan_task.py", "--problem-dir", str(tmp_path), "--workers", str(workers),
+    ])
+    with pytest.raises(SystemExit) as error:
+        plan_task.main()
+    assert error.value.code == 2
 
 
 def test_plan_only_batch_reproduce_uses_each_tasks_paper(planner, tmp_path, monkeypatch):
