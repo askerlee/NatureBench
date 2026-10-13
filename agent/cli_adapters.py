@@ -17,6 +17,7 @@ from .adapter import REGISTRY, AgentAdapter, AgentRunContext
 from . import cli_commands as cc
 from .claude import ClaudeAgent
 from .codex import CodexAgent
+from .codex_planning import PlanningCodexAgent
 from .gemini import GeminiAgent
 
 
@@ -109,6 +110,23 @@ class CodexAdapter(AgentAdapter):
         return stream if stream.exists() else None
 
 
+class PlanningCodexAdapter(CodexAdapter):
+    name = "codex-planning"
+
+    def system_prompt(self, ctx: AgentRunContext) -> str:
+        agent = PlanningCodexAgent(model_name=ctx.model, mode=ctx.mode)
+        if ctx.is_resume:
+            return cc.RESUME_PROMPT_CODEX + "\n\n" + agent.planning_guidance()
+        return agent.build_system_prompt(_task_info(ctx))
+
+    def transcript_path(self, task_out_dir: Path) -> Optional[Path]:
+        parent_path = super().transcript_path(task_out_dir)
+        if parent_path is not None:
+            return parent_path
+        stream = task_out_dir / f"{self.name}.jsonl"
+        return stream if stream.exists() else None
+
+
 class GeminiAdapter(AgentAdapter):
     name = "gemini"
 
@@ -146,4 +164,5 @@ class GeminiAdapter(AgentAdapter):
 
 REGISTRY.register(ClaudeAdapter())
 REGISTRY.register(CodexAdapter())
+REGISTRY.register(PlanningCodexAdapter())
 REGISTRY.register(GeminiAdapter())

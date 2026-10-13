@@ -773,7 +773,7 @@ def _resume_eligible(task_out_dir: Path, agent_name: str) -> Tuple[bool, str]:
         if not state_path.exists():
             return False, "no .claude_state directory"
         return True, "ok"
-    if agent_name == "codex":
+    if agent_name in ("codex", "codex-planning"):
         sid_path = task_out_dir / "codex_session_id.txt"
         state_path = task_out_dir / ".codex_state"
         if not sid_path.exists():
@@ -1505,11 +1505,11 @@ def _run_single_task(
     err_path = task_out_dir / f"{agent_name}.err"
     task_codex_state_dir: Optional[Path] = None
     codex_resume_sid: Optional[str] = None
-    if agent_name == "codex" and is_resume and codex_use_api_key:
+    if agent_name in ("codex", "codex-planning") and is_resume and codex_use_api_key:
         raise RuntimeError(
             f"[{task_name}] codex resume not supported in api-key mode"
         )
-    if agent_name == "codex" and not codex_use_api_key and codex_auth_dir is not None:
+    if agent_name in ("codex", "codex-planning") and not codex_use_api_key and codex_auth_dir is not None:
         task_codex_state_dir = _prepare_task_codex_state_dir(
             task_out_dir,
             codex_auth_dir,
@@ -1535,7 +1535,7 @@ def _run_single_task(
         claude_state_dir = task_out_dir / ".claude_state"
         claude_state_dir.mkdir(parents=True, exist_ok=True)
         prior_history = _load_resume_history(task_out_dir) if is_resume else []
-    elif agent_name == "codex" and is_resume:
+    elif agent_name in ("codex", "codex-planning") and is_resume:
         prior_history = _load_resume_history(task_out_dir)
     # Gemini session/state management (symmetric with claude/codex)
     gemini_session_id: Optional[str] = None
@@ -1577,7 +1577,7 @@ def _run_single_task(
             image_tag = _ensure_task_image(task_name, data_dir, base_image=base_image, dockerfile_name=dockerfile_name)
             df_spec = DockerfileSpec()
 
-        if agent_name == "codex" and not codex_use_api_key and task_codex_state_dir is not None:
+        if agent_name in ("codex", "codex-planning") and not codex_use_api_key and task_codex_state_dir is not None:
             logger.debug("[%s] codex device-auth state ready at %s", task_name, task_codex_state_dir)
 
         # 2. Build agent prompt
@@ -1763,7 +1763,7 @@ def _run_single_task(
                 # For Codex, only pass OPENAI_API_KEY / OPENAI_BASE_URL if the
                 # selected auth mode is API-key mode. In device-auth mode the
                 # container reads official login state mounted via HOME.
-                if agent_name == "codex" and key in ("OPENAI_API_KEY", "OPENAI_BASE_URL"):
+                if agent_name in ("codex", "codex-planning") and key in ("OPENAI_API_KEY", "OPENAI_BASE_URL"):
                     if codex_use_api_key and os.environ.get(key):
                         docker_cmd.extend(["-e", f"{key}={val}"])
                 else:
@@ -1775,7 +1775,7 @@ def _run_single_task(
 
         # Codex official auth persistence: mount host auth dir into the
         # container's HOME/.codex so `codex login --device-auth` can be reused.
-        if agent_name == "codex" and not codex_use_api_key and task_codex_state_dir is not None:
+        if agent_name in ("codex", "codex-planning") and not codex_use_api_key and task_codex_state_dir is not None:
             docker_cmd.extend(_codex_auth_mount_args(task_codex_state_dir))
 
         if proxy_mode == "sidecar":
@@ -2045,7 +2045,7 @@ def _run_single_task(
         # Clean up container (docker run without --rm, we clean up manually)
         _remove_container(container_name)
 
-        if agent_name == "codex" and task_codex_state_dir is not None:
+        if agent_name in ("codex", "codex-planning") and task_codex_state_dir is not None:
             sid = _capture_codex_session_id(
                 task_codex_state_dir,
                 since_mtime=task_start,
@@ -2776,7 +2776,7 @@ def main() -> None:
                     f"clash bundle at {proxy_bundle} is missing {required}"
                 )
 
-    if agent_name == "codex":
+    if agent_name in ("codex", "codex-planning"):
         if codex_use_api_key and not os.environ.get("OPENAI_API_KEY"):
             raise RuntimeError("Codex auth mode is api-key, but OPENAI_API_KEY is not set")
         if not codex_use_api_key:
@@ -2802,8 +2802,8 @@ def main() -> None:
 
     # --- Resume selection (manual, per-task) ---
     resume_set: set = set(getattr(args, "resume_tasks", []) or [])
-    if agent_name not in ("claude", "codex", "gemini") and resume_set:
-        raise ValueError("--resume-tasks is only supported when --agent is claude, codex, or gemini")
+    if agent_name not in ("claude", "codex", "codex-planning", "gemini") and resume_set:
+        raise ValueError("--resume-tasks is only supported when --agent is claude, codex, codex-planning, or gemini")
     rt_file = getattr(args, "resume_task_file", None)
     if rt_file:
         rtp = Path(rt_file).resolve()
@@ -2814,8 +2814,8 @@ def main() -> None:
                     resume_set.add(t)
         else:
             logger.warning("resume task file not found: %s", rtp)
-    if agent_name not in ("claude", "codex", "gemini") and resume_set:
-        raise ValueError("--resume-tasks/--resume-task-file are only supported when --agent is claude, codex, or gemini")
+    if agent_name not in ("claude", "codex", "codex-planning", "gemini") and resume_set:
+        raise ValueError("--resume-tasks/--resume-task-file are only supported when --agent is claude, codex, codex-planning, or gemini")
     resume_only = bool(getattr(args, "resume_only", False))
     force_fresh_set: set = set(getattr(args, "force_fresh", []) or [])
 

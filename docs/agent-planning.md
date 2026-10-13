@@ -90,3 +90,38 @@ Focused tests (no API credentials, Docker, or benchmark data required):
 ```bash
 python -m pytest agent/planning_test.py agent/lumen_adapter_test.py -q
 ```
+
+## Codex With Staged Planning
+
+Use `--agent codex-planning` to combine Codex's interactive tool execution with
+the four planning stages above. `PlanningCodexAgent` inherits `CodexAgent` and
+adds prompt guidance for a time-boxed plan, facts versus assumptions, local
+output-contract validation, feedback classification, and an experiment history.
+It does not use the planning agent's API backend, JSON file-map generation, or
+fixed attempt limit. The original `codex` agent remains unchanged.
+
+```bash
+python run_naturebench.py \
+  --agent codex-planning \
+  --model gpt-5.4 \
+  --tasks cpu \
+  --out-dir ./results/codex_planning_cpu \
+  --start-eval-services \
+  --eval-env-mapping ./eval_env_mapping.json \
+  --ensure-base-image
+```
+
+The same Codex CLI installation, authentication options, and device-auth resume
+machinery apply. All Codex modes remain available, including `reference` and
+`reproduce`; reproduction constraints take precedence over baseline exploration.
+On resume, the planning guidance is re-injected alongside Codex's resume notice.
+
+The prompt requests `workspace/PLAN.md`, `workspace/experiments.jsonl`, and
+workspace-local snapshots of the best evaluated source/configuration. These are
+model-written artifacts, not harness-enforced validation or guaranteed files.
+The Codex transcript remains available to the judge. This integration has not
+been benchmarked for score improvements.
+
+```bash
+python -m pytest agent/codex_planning_test.py -q
+```
