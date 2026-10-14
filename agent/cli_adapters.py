@@ -78,9 +78,10 @@ class CodexAdapter(AgentAdapter):
     name = "codex"
 
     def system_prompt(self, ctx: AgentRunContext) -> str:
+        prompt = CodexAgent(model_name=ctx.model, mode=ctx.mode).build_system_prompt(_task_info(ctx))
         if ctx.is_resume:
-            return cc.RESUME_PROMPT_CODEX
-        return CodexAgent(model_name=ctx.model, mode=ctx.mode).build_system_prompt(_task_info(ctx))
+            return cc.RESUME_PROMPT_CODEX + "\n\n" + prompt
+        return prompt
 
     def build_command(self, ctx: AgentRunContext) -> List[str]:
         cmd = cc.build_codex_cmd(
@@ -115,9 +116,10 @@ class PlanningCodexAdapter(CodexAdapter):
 
     def system_prompt(self, ctx: AgentRunContext) -> str:
         agent = CodexPlanningAgent(model_name=ctx.model, mode=ctx.mode)
+        prompt = agent.build_system_prompt(_task_info(ctx))
         if ctx.is_resume:
-            return cc.RESUME_PROMPT_CODEX + "\n\n" + agent.planning_guidance()
-        return agent.build_system_prompt(_task_info(ctx))
+            return cc.RESUME_PROMPT_CODEX + "\n\n" + prompt
+        return prompt
 
     def transcript_path(self, task_out_dir: Path) -> Optional[Path]:
         parent_path = super().transcript_path(task_out_dir)

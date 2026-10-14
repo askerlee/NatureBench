@@ -43,6 +43,66 @@ def test_prompt_preserves_parent_and_adds_planning(mode):
 
 
 @pytest.mark.parametrize("agent_class", [CodexAgent, CodexPlanningAgent])
+@pytest.mark.parametrize("mode", ["base", "reference", "legacy_base"])
+def test_research_prompt_budgeting_and_validity(agent_class, mode):
+    prompt = agent_class("gpt-test", mode=mode).build_system_prompt({
+        "eval_service_url": "http://evaluation:8321",
+        "eval_token": "test-token",
+        "time_limit_minutes": 30,
+    })
+    for instruction in (
+        "early valid, task-appropriate baseline",
+        "there is no fixed five-minute deadline",
+        "Give promising methods enough training",
+        "Reserve a completion margin",
+        "rather than starting doomed runs",
+        "compact script or a few modules",
+        "task-permitted general-purpose libraries, solvers, and pretrained weights",
+        "Verify resource provenance and task permission",
+        "trained, learned, fit, or optimized from the provided data",
+        "a pretrained model alone does not waive this requirement",
+        "any file, field, split, task instance, or artifact",
+        "nearest-neighbor templates",
+        "benchmark-specific/reference library APIs",
+        "external LLM APIs",
+        "withheld source paper",
+        "Do not perform internet searches",
+        "tune or select genuinely fitted methods",
+        "evaluation feedback to reconstruct answers or tune output constants",
+        "Engineering failures",
+        "if a valid evaluated solution already exists",
+    ):
+        assert instruction in prompt
+    for obsolete in (
+        "SIMPLEST possible baseline",
+        "within the first 5 minutes",
+        "existing five-minute target",
+        "existing first-evaluation deadline",
+        "Do not spend too long on one approach",
+        "Production Ready",
+        "Only use files provided within",
+        "Only consider stopping early",
+    ):
+        assert obsolete not in prompt
+    assert "http://evaluation:8321/evaluate" in prompt
+    assert '"eval_token": "test-token"' in prompt
+    assert "**30 minutes**" in prompt
+    for placeholder in ("research_time_guidance", "scientific_validity", "resource_rules"):
+        assert "{" + placeholder + "}" not in prompt
+    assert ("# Session Rules" in prompt) is (mode != "legacy_base")
+
+
+@pytest.mark.parametrize("agent_class", [CodexAgent, CodexPlanningAgent])
+def test_reproduce_prompt_preserves_methodology_constraints(agent_class):
+    prompt = agent_class("gpt-test", mode="reproduce").build_system_prompt({})
+    assert "**Read the paper thoroughly before writing any code.**" in prompt
+    assert "Do NOT switch methods" in prompt
+    assert "Ensemble methods unless the paper does" in prompt
+    assert "DEVIATIONS.md" in prompt
+    assert "there is no fixed five-minute deadline" not in prompt
+
+
+@pytest.mark.parametrize("agent_class", [CodexAgent, CodexPlanningAgent])
 def test_direct_solve_disables_search_and_preserves_execution(tmp_path, monkeypatch, agent_class):
     calls = []
     workspace = tmp_path / "workspace"
@@ -102,6 +162,9 @@ def test_plan_only_prompt_uses_codex_heuristics(tmp_path, monkeypatch, mode):
     assert "Separate training and test data" in prompt
     assert "Deprioritize CPU-first method selection" in prompt
     assert "additional self-supervised pretraining" in prompt
+    assert "trained, learned, fit, or optimized from the provided data" in prompt
+    assert "never to reconstruct targets or tune output constants" in prompt
+    assert "completion\nmargin" in prompt
     assert "# Planning-Only Scope" in prompt
     assert "# Evaluation Service" not in prompt
     assert "# Session Rules" not in prompt
@@ -128,12 +191,21 @@ def test_adapter_inherits_codex_command(options):
 
 
 @pytest.mark.parametrize("is_resume", [False, True])
-def test_adapter_prompt_keeps_planning_on_resume(is_resume):
-    ctx = AgentRunContext(system_prompt="", model="gpt-test", is_resume=is_resume)
-    prompt = REGISTRY.get("codex-planning").system_prompt(ctx)
-    assert "# Staged Planning And Evidence" in prompt
-    assert "On resume, read PLAN.md" in prompt
+@pytest.mark.parametrize("agent_name", ["codex", "codex-planning"])
+@pytest.mark.parametrize("mode", ["base", "reference", "reproduce", "legacy_base"])
+def test_adapter_prompt_keeps_current_mode_on_resume(is_resume, agent_name, mode):
+    ctx = AgentRunContext(system_prompt="", model="gpt-test", mode=mode,
+                          is_resume=is_resume)
+    prompt = REGISTRY.get(agent_name).system_prompt(ctx)
+    agent_class = CodexPlanningAgent if agent_name == "codex-planning" else CodexAgent
+    task = {"eval_service_url": ctx.eval_service_url, "eval_token": ctx.eval_token,
+            "time_limit_minutes": ctx.time_limit_minutes}
+    assert prompt.endswith(agent_class(ctx.model, mode=mode).build_system_prompt(task))
+    assert ("# Staged Planning And Evidence" in prompt) is (agent_name == "codex-planning")
     assert ("RESUME NOTICE" in prompt) is is_resume
+    if is_resume:
+        assert "reserve time for inference, output checks, and evaluation" in prompt
+        assert "Only consider stopping early" not in prompt
 
 
 def test_adapter_transcript_prefers_codex_session(tmp_path):

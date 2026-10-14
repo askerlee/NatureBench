@@ -13,9 +13,10 @@ concise /workspace/PLAN.md covering the four stages below. This is a working
 plan, not a separate text-only response: write it with a tool call and continue
 implementing. Keep planning lightweight: spend at most 10% of remaining time,
 capped at 2 minutes, on drafting the plan after the required reading. In base
-and reference modes, do not delay the first baseline evaluation beyond the
-existing five-minute target. In reproduce mode, understand the paper first and
-preserve its methodology; planning is not permission to substitute a baseline.
+and reference modes, set an early task-appropriate baseline target using measured
+data-processing and training costs, not a fixed deadline. In reproduce mode,
+understand the paper first and preserve its methodology; planning is not
+permission to substitute a baseline.
 
 {stages}
 
@@ -30,6 +31,11 @@ and a small number of modules rather than overengineering the architecture.
 Choose methods from the structure of the data and prediction target, not
 only familiarity or implementation speed. Identify the relationships,
 symmetries, noise processes, and domain shifts a method should capture.
+Every submitted output must come from a method whose key predictive behavior is
+trained, learned, fit, or optimized from the provided data. General-purpose
+pretraining is a pipeline component, not a substitute for this requirement or
+permission to retrieve benchmark answers. Use evaluation feedback to tune or
+select fitted methods, never to reconstruct targets or tune output constants.
 
 Deprioritize CPU-first method selection. CPU compatibility and cheap execution
 are not sufficient reasons to rank a method as the main research candidate.
@@ -60,14 +66,15 @@ Prefer these improvements over a weaker representation when evidence supports
 their suitability; do not treat larger models as inherently better. Verify
 model provenance, split restrictions, and compute cost before use. Do not use
 held-out data for pretraining unless explicitly allowed, and validate the gain
-on permitted validation data without delaying the first baseline evaluation.
+on permitted validation data. Budget representation experiments using measured
+costs rather than sacrificing methodological suitability for an arbitrary deadline.
 
 In base and reference modes, distinguish baselines from research candidates.
 Baselines establish correct execution and provide performance references;
 they are a role, not a model family. Research candidates test concrete
 hypotheses about limitations of current approaches using methods suited to
 the data and target. State what important structure each approach omits.
-Preserve the existing first-evaluation deadline.
+Set the first-evaluation target from measured feasibility and record the reason.
 
 Explore multiple candidates as time permits; do not restrict the workflow to
 one baseline and one upgrade. Prioritize experiments by expected scientific
@@ -76,6 +83,13 @@ on resource grounds, run a small setup and throughput check when affordable,
 including training or embedding extraction and inference costs. Do not reject
 a candidate solely because it is unfamiliar or more complex, or prefer it
 solely because it is neural or pretrained.
+
+Give promising candidates sufficient training to support a meaningful comparison;
+do not treat an undertrained model or a repairable implementation failure as
+evidence against the method. Before launching an experiment, account for setup,
+training, inference, output checks, and evaluation, and reserve a completion
+margin. When no new experiment fits, validate and preserve the best evaluated
+solution instead of repeatedly evaluating unchanged outputs.
 
 Select the best validated approach or justified ensemble, whether baseline or
 research candidate. Record the evidence for retaining or rejecting candidates;

@@ -159,7 +159,8 @@ the four planning stages above. `CodexPlanningAgent` inherits `CodexAgent` and
 adds prompt guidance for a time-boxed plan, facts versus assumptions, local
 output-contract validation, feedback classification, and an experiment history.
 It does not use the planning agent's API backend, JSON file-map generation, or
-fixed attempt limit. The original `codex` agent remains unchanged.
+fixed attempt limit. Both agents share the research-budgeting and
+scientific-validity instructions; `codex-planning` adds the staged workflow.
 
 ```bash
 python run_naturebench.py \
@@ -175,7 +176,24 @@ python run_naturebench.py \
 The same Codex CLI installation, authentication options, and device-auth resume
 machinery apply. All Codex modes remain available, including `reference` and
 `reproduce`; reproduction constraints take precedence over baseline exploration.
-On resume, the planning guidance is re-injected alongside Codex's resume notice.
+On resume, the full current mode's prompt is re-injected alongside Codex's resume
+notice, including scientific-validity rules and, for `codex-planning`, planning
+guidance. Existing evaluated solutions should be continued rather than restarted.
+
+Base and reference modes target an early valid, task-appropriate baseline using
+measured data-processing and training costs, not a fixed five-minute deadline.
+Experiments should allow meaningful training and reserve time for inference,
+output checks, and evaluation. Compact, reproducible implementations are preferred
+over production infrastructure. Task-permitted general-purpose pretrained weights
+may be used as pipeline components after verifying permission and provenance;
+the submitted output must still come from a method fit or optimized from the
+provided data, not answer retrieval or a pretrained answer generator.
+
+Base mode forbids withheld-paper materials and task-specific derivatives, answer
+recovery from any split or artifact, and score-feedback-based answer construction.
+Reference hints derived from the withheld paper and reproduce-mode paper access
+are calibration features, not valid inputs for the withheld-paper benchmark
+rubric. Reproduce mode retains its faithful-methodology constraints.
 
 Codex's built-in web search is explicitly disabled in both harness runs and
 direct `CodexAgent.solve_task()` / `CodexPlanningAgent.solve_task()` calls.
