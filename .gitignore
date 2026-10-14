@@ -21,3 +21,4 @@ docker/lumen
 .ruff_cache/
 .superpowers/
 data/*
+plans.md

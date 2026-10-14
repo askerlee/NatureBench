@@ -1,7 +1,7 @@
 """Codex tool-driven solver with staged scientific planning guidance."""
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from .codex import CodexAgent
 from .planning import PLANNING_STAGES
@@ -25,6 +25,64 @@ List missing details and the cheapest check that could resolve them. Do not
 claim to have read an unavailable paper or infer undocumented paper settings.
 Update the plan when observations change it. Use installed scientific libraries
 and a small number of modules rather than overengineering the architecture.
+
+# Method Selection Heuristics
+Choose methods from the structure of the data and prediction target, not
+only familiarity or implementation speed. Identify the relationships,
+symmetries, noise processes, and domain shifts a method should capture.
+
+Deprioritize CPU-first method selection. CPU compatibility and cheap execution
+are not sufficient reasons to rank a method as the main research candidate.
+Prioritize structurally appropriate learned representations, graph models,
+neural models, and permitted pretraining when scientifically justified and
+feasible. Inspect accelerator availability and measure resource requirements;
+do not assume an unknown environment requires CPU-only methods. Use inexpensive
+classical methods primarily as baselines, diagnostics, or fallbacks unless
+scientific reasoning or permitted validation evidence supports prioritizing
+them. Do not equate GPU use with scientific quality, and retain the best
+validated method regardless of hardware.
+
+For spatial cell/spot data, consider whether neighborhood context and
+spatial or molecular graphs are central to the target. Compare fixed
+neighborhood aggregation with learned graph integration or partitioning;
+do not assume a graph neural network is automatically superior.
+
+For paired modalities, consider learned alignment and complementary
+information rather than relying only on concatenation. For source-to-target
+transfer, consider explicit domain adaptation. Assess permitted pretrained
+representations and scientific resources before defaulting to handcrafted
+features.
+
+When applicable and feasible within the remaining budget, strengthen the
+representation through additional self-supervised pretraining on permitted
+data from the current dataset or a better-suited permitted pretrained model.
+Prefer these improvements over a weaker representation when evidence supports
+their suitability; do not treat larger models as inherently better. Verify
+model provenance, split restrictions, and compute cost before use. Do not use
+held-out data for pretraining unless explicitly allowed, and validate the gain
+on permitted validation data without delaying the first baseline evaluation.
+
+In base and reference modes, distinguish baselines from research candidates.
+Baselines establish correct execution and provide performance references;
+they are a role, not a model family. Research candidates test concrete
+hypotheses about limitations of current approaches using methods suited to
+the data and target. State what important structure each approach omits.
+Preserve the existing first-evaluation deadline.
+
+Explore multiple candidates as time permits; do not restrict the workflow to
+one baseline and one upgrade. Prioritize experiments by expected scientific
+value, measured feasibility, and remaining budget. Before rejecting a candidate
+on resource grounds, run a small setup and throughput check when affordable,
+including training or embedding extraction and inference costs. Do not reject
+a candidate solely because it is unfamiliar or more complex, or prefer it
+solely because it is neural or pretrained.
+
+Select the best validated approach or justified ensemble, whether baseline or
+research candidate. Record the evidence for retaining or rejecting candidates;
+do not claim superiority from architecture or implementation convenience alone.
+
+In reproduce mode, these heuristics guide diagnosis and implementation
+choices within the paper's methodology; they do not authorize replacing it.
 
 # Validation And Feedback
 Before each evaluation, execute local output-contract checks derived from the
@@ -61,8 +119,26 @@ scientific-validity rules, including its stopping criteria.
 """
 
 
-class PlanningCodexAgent(CodexAgent):
+class CodexPlanningAgent(CodexAgent):
     """Retain Codex execution while adding a structured planning workflow."""
+
+    def __init__(
+        self,
+        model_name: str,
+        mode: str = "base",
+        *,
+        plan_only: bool = False,
+        backend_kwargs: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        super().__init__(model_name, mode=mode)
+        self.plan_only = plan_only
+        if plan_only:
+            from .planning import PlanningAgent
+
+            self._plan_only_planner = PlanningAgent(
+                model_name, mode=mode, backend_kwargs=backend_kwargs,
+            )
+            self.backend = self._plan_only_planner.backend
 
     def planning_guidance(self) -> str:
         stages = "\n".join(
@@ -72,4 +148,28 @@ class PlanningCodexAgent(CodexAgent):
         return CODEX_PLANNING_GUIDANCE.format(stages=stages)
 
     def build_system_prompt(self, task: Dict[str, Any]) -> str:
+        if self.plan_only:
+            heuristics = CODEX_PLANNING_GUIDANCE.split(
+                "# Method Selection Heuristics\n", 1,
+            )[1].split("# Validation And Feedback", 1)[0]
+            return (
+                self._plan_only_planner.build_system_prompt(task)
+                + "\n\n# Method Selection Heuristics\n" + heuristics
+                + "\n# Planning-Only Scope\n"
+                "Produce planning prose only. Describe feasibility, hardware, data, "
+                "and validation checks for later execution; do not claim they ran. "
+                "Do not write implementation files, run tools, or contact an evaluation "
+                "service. Execution deadlines and experiment recording apply to the "
+                "future solver run, not this planning session."
+            )
         return super().build_system_prompt(task) + "\n\n" + self.planning_guidance()
+
+    def call_model(self, messages, **kwargs):
+        if not self.plan_only:
+            raise ValueError("API model calls require plan_only=True.")
+        return self._plan_only_planner.call_model(messages, **kwargs)
+
+    def solve_task(self, task: Dict[str, Any], llm_kwargs=None) -> Dict[str, Any]:
+        if self.plan_only:
+            raise ValueError("Planning-only agents cannot execute a solution.")
+        return super().solve_task(task, llm_kwargs)

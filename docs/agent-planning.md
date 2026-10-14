@@ -155,7 +155,7 @@ python -m pytest agent/planning_test.py agent/lumen_adapter_test.py -q
 ## Codex With Staged Planning
 
 Use `--agent codex-planning` to combine Codex's interactive tool execution with
-the four planning stages above. `PlanningCodexAgent` inherits `CodexAgent` and
+the four planning stages above. `CodexPlanningAgent` inherits `CodexAgent` and
 adds prompt guidance for a time-boxed plan, facts versus assumptions, local
 output-contract validation, feedback classification, and an experiment history.
 It does not use the planning agent's API backend, JSON file-map generation, or

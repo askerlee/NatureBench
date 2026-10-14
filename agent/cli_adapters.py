@@ -17,7 +17,7 @@ from .adapter import REGISTRY, AgentAdapter, AgentRunContext
 from . import cli_commands as cc
 from .claude import ClaudeAgent
 from .codex import CodexAgent
-from .codex_planning import PlanningCodexAgent
+from .codex_planning import CodexPlanningAgent
 from .gemini import GeminiAgent
 
 
@@ -114,7 +114,7 @@ class PlanningCodexAdapter(CodexAdapter):
     name = "codex-planning"
 
     def system_prompt(self, ctx: AgentRunContext) -> str:
-        agent = PlanningCodexAgent(model_name=ctx.model, mode=ctx.mode)
+        agent = CodexPlanningAgent(model_name=ctx.model, mode=ctx.mode)
         if ctx.is_resume:
             return cc.RESUME_PROMPT_CODEX + "\n\n" + agent.planning_guidance()
         return agent.build_system_prompt(_task_info(ctx))

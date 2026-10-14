@@ -8,7 +8,7 @@ import pytest
 from agent.codex import CodexAgent
 from agent.adapter import REGISTRY, AgentRunContext
 import agent.cli_adapters
-from agent.codex_planning import PlanningCodexAgent
+from agent.codex_planning import CodexPlanningAgent
 from agent.planning import PLANNING_STAGES
 
 
@@ -16,7 +16,7 @@ from agent.planning import PLANNING_STAGES
 def test_prompt_preserves_parent_and_adds_planning(mode):
     task = {"eval_service_url": "http://evaluation:8321", "eval_token": "test-token",
             "time_limit_minutes": 30}
-    agent = PlanningCodexAgent("gpt-test", mode=mode)
+    agent = CodexPlanningAgent("gpt-test", mode=mode)
     prompt = agent.build_system_prompt(task)
     assert prompt.startswith(CodexAgent("gpt-test", mode=mode).build_system_prompt(task))
     for stage, instruction in PLANNING_STAGES:
@@ -27,6 +27,19 @@ def test_prompt_preserves_parent_and_adds_planning(mode):
     assert "output-contract checks" in prompt
     assert "rather than switching" in prompt
     assert "no fixed attempt limit" in prompt
+    assert "additional self-supervised pretraining" in prompt
+    assert "better-suited permitted pretrained model" in prompt
+    assert "held-out data for pretraining unless explicitly allowed" in prompt
+    assert "distinguish baselines from research candidates" in prompt
+    assert "Explore multiple candidates as time permits" in prompt
+    assert "one baseline and one upgrade" in prompt
+    assert "small setup and throughput check" in prompt
+    assert "Select the best validated approach or justified ensemble" in prompt
+    assert "they do not authorize replacing it" in prompt
+    assert "Deprioritize CPU-first method selection" in prompt
+    assert "Inspect accelerator availability" in prompt
+    assert "classical methods primarily as baselines, diagnostics, or fallbacks" in prompt
+    assert "validated method regardless of hardware" in prompt
 
 
 def test_inherited_solve_uses_planning_prompt(tmp_path, monkeypatch):
@@ -40,14 +53,50 @@ def test_inherited_solve_uses_planning_prompt(tmp_path, monkeypatch):
         return subprocess.CompletedProcess(command, 0)
 
     monkeypatch.setattr("agent.codex.subprocess.run", run)
-    agent = PlanningCodexAgent("gpt-test")
+    agent = CodexPlanningAgent("gpt-test")
     result = agent.solve_task({"output_path": str(tmp_path), "workspace_path": str(workspace)})
-    assert PlanningCodexAgent.solve_task is CodexAgent.solve_task
     assert calls[0][0] == "codex"
     assert calls[0][-1] == agent.system_prompt
     assert "# Staged Planning And Evidence" in calls[0][-1]
     assert result["codex_returncode"] == 0
     assert result["trajectory"][0]["code"] == "print('solution')\n"
+
+
+@pytest.mark.parametrize("mode", ["base", "reproduce"])
+def test_plan_only_prompt_uses_codex_heuristics(tmp_path, monkeypatch, mode):
+    from plan_task import generate_plan
+
+    calls = []
+
+    class FakeBackend:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def respond(self, messages, **kwargs):
+            calls.append([dict(message) for message in messages])
+            return "Proposed methodology", 10, 20
+
+    monkeypatch.setattr("agent.backend.base_backend.LLMBackend", FakeBackend)
+    agent = CodexPlanningAgent("gpt-test", mode=mode, plan_only=True)
+    task = {
+        "task_description": "Predict held-out values",
+        "data_description": "Separate training and test data",
+        "paper_content": "Required paper methodology",
+    }
+    sections = generate_plan(agent, task, stages=1)
+    prompt = calls[0][0]["content"]
+    assert sections == {"methodology": "Proposed methodology"}
+    assert "Predict held-out values" in prompt
+    assert "Separate training and test data" in prompt
+    assert "Deprioritize CPU-first method selection" in prompt
+    assert "additional self-supervised pretraining" in prompt
+    assert "# Planning-Only Scope" in prompt
+    assert "# Evaluation Service" not in prompt
+    assert "# Session Rules" not in prompt
+    assert ("Faithfully reproduce the supplied paper" in prompt) is (mode == "reproduce")
+    assert list(tmp_path.iterdir()) == []
+    with pytest.raises(ValueError, match="cannot execute"):
+        agent.solve_task(task)
 
 
 @pytest.mark.parametrize("options", [

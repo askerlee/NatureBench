@@ -13,7 +13,8 @@ import time
 import traceback
 from typing import Any, Dict, Iterator
 
-from agent.planning import PlanningAgent, PLANNING_STAGES
+from agent.codex_planning import CodexPlanningAgent
+from agent.planning import PLANNING_STAGES
 
 
 PLAN_ONLY_GUIDANCE = """Produce planning prose only. Do not generate implementation
@@ -56,7 +57,7 @@ def report_wait(label: str, interval: float) -> Iterator[None]:
 
 
 def generate_plan(
-    planner: PlanningAgent,
+    planner: CodexPlanningAgent,
     task: Dict[str, Any],
     *,
     max_tokens: int = 4096,
@@ -150,7 +151,9 @@ def plan_problem(
                  f"data_chars={len(task['data_description'])}, "
                  f"paper_chars={len(task.get('paper_content', ''))}")
         progress(f"{task_id}: initializing LLM backend")
-        planner = PlanningAgent(args.model, mode=args.mode, backend_kwargs={"max_retries": 0})
+        planner = CodexPlanningAgent(
+            args.model, mode=args.mode, plan_only=True, backend_kwargs={"max_retries": 0},
+        )
         row.update(generate_plan(planner, task, max_tokens=args.max_tokens,
                                  heartbeat_seconds=args.heartbeat_seconds,
                                  stages=args.stages))

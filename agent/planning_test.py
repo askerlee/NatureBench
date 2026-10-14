@@ -59,7 +59,7 @@ def test_plan_only_cli_writes_plan_without_implementation(planner, tmp_path, mon
     (problem / "README.md").write_text("Predict held-out values")
     (problem / "data_description.md").write_text("Separate training and test data")
     output = tmp_path / "plans" / "PLAN.md"
-    monkeypatch.setattr(plan_task, "PlanningAgent", lambda *args, **kwargs: planner)
+    monkeypatch.setattr(plan_task, "CodexPlanningAgent", lambda *args, **kwargs: planner)
     monkeypatch.setattr("sys.argv", [
         "plan_task.py", "--problem-dir", str(problem), "--output", str(output),
     ])
@@ -88,7 +88,7 @@ def test_plan_only_cli_limits_stages_and_table_columns(planner, tmp_path, monkey
     (problem / "README.md").write_text("Task")
     (problem / "data_description.md").write_text("Data")
     output = tmp_path / "plans.md"
-    monkeypatch.setattr(plan_task, "PlanningAgent", lambda *args, **kwargs: planner)
+    monkeypatch.setattr(plan_task, "CodexPlanningAgent", lambda *args, **kwargs: planner)
     monkeypatch.setattr("sys.argv", [
         "plan_task.py", "--problem-dir", str(problem), "--output", str(output),
         "--stages", str(stages),
@@ -112,7 +112,7 @@ def test_plan_only_cli_rejects_invalid_stage_count(tmp_path, monkeypatch, stages
     def unexpected_backend(*args, **kwargs):
         pytest.fail("Invalid stage count must be rejected before backend initialization")
 
-    monkeypatch.setattr(plan_task, "PlanningAgent", unexpected_backend)
+    monkeypatch.setattr(plan_task, "CodexPlanningAgent", unexpected_backend)
     monkeypatch.setattr("sys.argv", [
         "plan_task.py", "--problem-dir", str(tmp_path), "--stages", str(stages),
     ])
@@ -218,9 +218,10 @@ def test_plan_only_batch_table_is_sorted_and_context_is_isolated(planner, tmp_pa
                                  "configuration", "method B", "architecture", "dependencies",
                                  "configuration"]
     output = tmp_path / "plans.md"
-    monkeypatch.setattr(plan_task, "PlanningAgent", lambda *args, **kwargs: planner)
+    monkeypatch.setattr(plan_task, "CodexPlanningAgent", lambda *args, **kwargs: planner)
     monkeypatch.setattr("sys.argv", [
         "plan_task.py", "--tasks-dir", str(tasks), "--output", str(output),
+        "--workers", "1",
     ])
     plan_task.main()
     assert len(planner.backend.calls) == 8
@@ -258,7 +259,7 @@ def test_plan_only_batch_records_failure_and_continues(planner, tmp_path, monkey
 
         monkeypatch.setattr(plan_task, "generate_plan", generate_with_failure)
     output = tmp_path / "plans.md"
-    monkeypatch.setattr(plan_task, "PlanningAgent", lambda *args, **kwargs: planner)
+    monkeypatch.setattr(plan_task, "CodexPlanningAgent", lambda *args, **kwargs: planner)
     monkeypatch.setattr("sys.argv", [
         "plan_task.py", "--tasks-dir", str(tasks), "--output", str(output),
         "--workers", str(workers),
@@ -324,7 +325,7 @@ def test_plan_only_parallel_tasks_are_bounded_and_table_has_one_writer(tmp_path,
         original_write(output, rows, *args, **kwargs)
 
     output = tmp_path / "plans.md"
-    monkeypatch.setattr(plan_task, "PlanningAgent", ConcurrentPlanner)
+    monkeypatch.setattr(plan_task, "CodexPlanningAgent", ConcurrentPlanner)
     monkeypatch.setattr(plan_task, "write_table", record_write)
     monkeypatch.setattr("sys.argv", [
         "plan_task.py", "--tasks-dir", str(tasks), "--workers", "2", "--stages", "2",
@@ -372,10 +373,11 @@ def test_plan_only_batch_reproduce_uses_each_tasks_paper(planner, tmp_path, monk
         (problem / "data_description.md").write_text("Data")
         (problem / "paper.md").write_text(f"Paper for {name}")
     output = tmp_path / "plans.md"
-    monkeypatch.setattr(plan_task, "PlanningAgent", lambda *args, **kwargs: planner)
+    monkeypatch.setattr(plan_task, "CodexPlanningAgent", lambda *args, **kwargs: planner)
     monkeypatch.setattr("sys.argv", [
         "plan_task.py", "--tasks-dir", str(tasks), "--mode", "reproduce",
         "--paper-name", "problem/paper.md", "--output", str(output),
+        "--workers", "1",
     ])
     plan_task.main()
     assert "Paper for alpha" in planner.backend.calls[0][0]["content"]
