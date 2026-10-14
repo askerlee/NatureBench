@@ -177,6 +177,10 @@ machinery apply. All Codex modes remain available, including `reference` and
 `reproduce`; reproduction constraints take precedence over baseline exploration.
 On resume, the planning guidance is re-injected alongside Codex's resume notice.
 
+Codex's built-in web search is explicitly disabled in both harness runs and
+direct `CodexAgent.solve_task()` / `CodexPlanningAgent.solve_task()` calls.
+This is a tool restriction, not a blanket block on outbound network access.
+
 The prompt requests `workspace/PLAN.md`, `workspace/experiments.jsonl`, and
 workspace-local snapshots of the best evaluated source/configuration. These are
 model-written artifacts, not harness-enforced validation or guaranteed files.

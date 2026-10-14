@@ -42,7 +42,8 @@ def test_prompt_preserves_parent_and_adds_planning(mode):
     assert "validated method regardless of hardware" in prompt
 
 
-def test_inherited_solve_uses_planning_prompt(tmp_path, monkeypatch):
+@pytest.mark.parametrize("agent_class", [CodexAgent, CodexPlanningAgent])
+def test_direct_solve_disables_search_and_preserves_execution(tmp_path, monkeypatch, agent_class):
     calls = []
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -53,11 +54,22 @@ def test_inherited_solve_uses_planning_prompt(tmp_path, monkeypatch):
         return subprocess.CompletedProcess(command, 0)
 
     monkeypatch.setattr("agent.codex.subprocess.run", run)
-    agent = CodexPlanningAgent("gpt-test")
+    agent = agent_class("gpt-test")
     result = agent.solve_task({"output_path": str(tmp_path), "workspace_path": str(workspace)})
-    assert calls[0][0] == "codex"
-    assert calls[0][-1] == agent.system_prompt
-    assert "# Staged Planning And Evidence" in calls[0][-1]
+    assert calls == [[
+        "codex", "exec",
+        "-C", str(tmp_path),
+        "--skip-git-repo-check",
+        "--yolo",
+        "--json",
+        "-c", "web_search=disabled",
+        "-m", "gpt-test",
+        "-o", str(tmp_path / "last.txt"),
+        agent.system_prompt,
+    ]]
+    assert ("# Staged Planning And Evidence" in calls[0][-1]) is (
+        agent_class is CodexPlanningAgent
+    )
     assert result["codex_returncode"] == 0
     assert result["trajectory"][0]["code"] == "print('solution')\n"
 
@@ -108,8 +120,11 @@ def test_plan_only_prompt_uses_codex_heuristics(tmp_path, monkeypatch, mode):
 def test_adapter_inherits_codex_command(options):
     ctx = AgentRunContext(system_prompt="hybrid-prompt", model="gpt-test", **options)
     hybrid = REGISTRY.get("codex-planning")
-    assert hybrid.build_command(ctx) == REGISTRY.get("codex").build_command(ctx)
-    assert hybrid.build_command(ctx)[-1] == "hybrid-prompt"
+    command = hybrid.build_command(ctx)
+    assert command == REGISTRY.get("codex").build_command(ctx)
+    assert command[-1] == "hybrid-prompt"
+    assert "--search" not in command
+    assert command[command.index("web_search=disabled") - 1] == "-c"
 
 
 @pytest.mark.parametrize("is_resume", [False, True])

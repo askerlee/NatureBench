@@ -367,15 +367,14 @@ class CodexAgent():
         log_path = output_path / "codex.jsonl"
         err_path = output_path / "codex.err"
 
-        # Construct the command for Codex
-        # codex --search exec -C <output_path> --skip-git-repo-check --yolo --json -m <model> -o <last_path> <prompt>
         cmd = [
             "codex",
-            "--search", "exec",
+            "exec",
             "-C", str(output_path),
             "--skip-git-repo-check",
             "--yolo",
             "--json",
+            "-c", "web_search=disabled",
             "-m", self.model_name,
             "-o", str(last_path),
             self.system_prompt
