@@ -182,33 +182,33 @@ def main() -> None:
     run = parser.add_argument_group("run selection")
     run.add_argument(
         "--tasks",
-        default="all",
+        default="./task-set/naturebench-25/all.txt",
         help=(
             "Task selection. Use one of all/cpu/gpu_high/gpu_low, or pass a "
             "custom task-set file path. The wrapper converts this to solve.py "
             "--task-set internally."
         ),
     )
-    run.add_argument("--out-dir", default=None)
+    run.add_argument("--out-dir", default="./results/codex_planning_25")
     run.add_argument("--dry-run", action="store_true", help="Print commands without running them.")
 
     agent = parser.add_argument_group("agent")
     agent.add_argument(
         "--agent",
-        default=None,
+        default="codex-planning",
         help="Agent harness. Built-in: claude, codex, gemini. Custom agents "
              "registered via the agent registry are also accepted (see "
              "docs/custom-agents.md). Required unless --download-only is used.",
     )
     agent.add_argument(
         "--model",
-        default=None,
+        default="gpt-6.1-sol",
         help="Model name passed to the agent CLI. Required unless --download-only is used.",
     )
     agent.add_argument("--mode", default="base", choices=["base", "reproduce"])
     agent.add_argument("--timeout", type=int, default=14400)
     agent.add_argument("--setup-timeout", type=int, default=14400)
-    agent.add_argument("--max-workers", type=int, default=1)
+    agent.add_argument("--max-workers", type=int, default=2)
 
     docker = parser.add_argument_group("docker and task setup")
     docker.add_argument("--skip-build", dest="skip_build", action="store_true", default=True)
@@ -225,7 +225,7 @@ def main() -> None:
     eval_group.add_argument("--skip-judge", action="store_true")
 
     gpu = parser.add_argument_group("gpu scheduling")
-    gpu.add_argument("--gpu-devices", default=None, help="Comma-separated GPU ids, e.g. 0,1,2,3.")
+    gpu.add_argument("--gpu-devices", default="0,1", help="Comma-separated GPU ids, e.g. 0,1,2,3.")
     gpu.add_argument("--gpu-pool-file", default=None)
     gpu.add_argument("--gpu-skip-busy-mb", type=int, default=None)
     gpu.add_argument("--gpu-skip-busy-util", type=int, default=None)
@@ -250,8 +250,8 @@ def main() -> None:
     proxy.add_argument("--proxy-socks-port", type=int, default=None)
 
     codex = parser.add_argument_group("codex")
-    codex.add_argument("--codex-auth-dir", default=None)
-    codex.add_argument("--codex-auth-mode", choices=["api-key", "device-auth"], default=None)
+    codex.add_argument("--codex-auth-dir", default="~/.codex")
+    codex.add_argument("--codex-auth-mode", choices=["api-key", "device-auth"], default="device-auth")
 
     parser.add_argument(
         "solve_args",

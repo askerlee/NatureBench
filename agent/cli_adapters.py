@@ -111,7 +111,7 @@ class CodexAdapter(AgentAdapter):
         return stream if stream.exists() else None
 
 
-class PlanningCodexAdapter(CodexAdapter):
+class CodexPlanningAdapter(CodexAdapter):
     name = "codex-planning"
 
     def system_prompt(self, ctx: AgentRunContext) -> str:
@@ -166,5 +166,5 @@ class GeminiAdapter(AgentAdapter):
 
 REGISTRY.register(ClaudeAdapter())
 REGISTRY.register(CodexAdapter())
-REGISTRY.register(PlanningCodexAdapter())
+REGISTRY.register(CodexPlanningAdapter())
 REGISTRY.register(GeminiAdapter())
