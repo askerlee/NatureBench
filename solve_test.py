@@ -18,6 +18,80 @@ import solve
 ROOT = Path(__file__).resolve().parent
 
 
+def test_copilot_command():
+    from agent.cli_commands import build_copilot_cmd
+
+    prompt = "Task prompt with 'quotes' and\nnewlines"
+    command = build_copilot_cmd(prompt, "test-model")
+    assert command[:5] == ["copilot", "-p", prompt, "--model", "test-model"]
+    assert "--allow-all-tools" in command
+    assert "--allow-all-paths" in command
+    assert "--allow-all-urls" in command
+    assert "--no-ask-user" in command
+    assert "--disable-builtin-mcps" in command
+    assert command[command.index("--excluded-tools") + 1] == "web_fetch"
+    assert command[command.index("--add-dir") + 1] == "/task"
+    assert command[command.index("--output-format") + 1] == "json"
+
+
+@pytest.mark.parametrize("mode", ["base", "reproduce"])
+def test_copilot_adapter_prompt_and_dispatch(mode):
+    from agent.adapter import AgentRunContext, REGISTRY
+    from agent.codex import CodexAgent
+    from agent.cli_commands import build_copilot_cmd
+
+    adapter = REGISTRY.get("copilot")
+    context = AgentRunContext(
+        system_prompt="", model="test-model", mode=mode,
+        eval_service_url="http://evaluation:8321", eval_token="opaque-token",
+        time_limit_minutes=30,
+    )
+    context.system_prompt = adapter.system_prompt(context)
+    assert context.system_prompt == CodexAgent("test-model", mode=mode).build_system_prompt({
+        "eval_service_url": context.eval_service_url,
+        "eval_token": context.eval_token,
+        "time_limit_minutes": 30,
+    })
+    assert adapter.build_command(context) == build_copilot_cmd(context.system_prompt, context.model)
+    context.is_resume = True
+    with pytest.raises(ValueError, match="resume is not supported"):
+        adapter.build_command(context)
+
+
+@pytest.mark.parametrize("key", ["COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"])
+def test_copilot_token_forwarding(monkeypatch, key):
+    from agent.adapter import AgentRunContext, REGISTRY
+
+    for variable in ("COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"):
+        monkeypatch.delenv(variable, raising=False)
+    context = AgentRunContext(system_prompt="prompt", model="test-model")
+    adapter = REGISTRY.get("copilot")
+    with pytest.raises(ValueError, match="Copilot requires"):
+        adapter.extra_env(context)
+    monkeypatch.setenv(key, "test-token")
+    assert adapter.extra_env(context) == [
+        "-e", "COPILOT_GITHUB_TOKEN=test-token",
+        "-e", "COPILOT_HOME=/tmp/naturebench-copilot",
+    ]
+    monkeypatch.setenv("COPILOT_GITHUB_TOKEN", "preferred-token")
+    assert adapter.extra_env(context)[1] == "COPILOT_GITHUB_TOKEN=preferred-token"
+    assert adapter.docker_mounts(context) == []
+
+
+def test_copilot_transcript(tmp_path):
+    from agent.adapter import REGISTRY
+
+    adapter = REGISTRY.get("copilot")
+    assert adapter.transcript_path(tmp_path) is None
+    log = tmp_path / "copilot.jsonl"
+    content = '{"type":"assistant.message","data":{"content":"measured result"}}\n'
+    log.write_text(content, encoding="utf-8")
+    assert adapter.transcript_path(tmp_path) == log
+    assert adapter.excerpt_transcript(log, focus_start=1, focus_end=2) == content
+    assert adapter.excerpt_transcript(log, max_bytes=10) == content[-10:]
+    assert adapter.excerpt_transcript(log, max_bytes=0) == ""
+
+
 def write_json(path, value):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(value), encoding="utf-8")

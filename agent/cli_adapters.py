@@ -1,15 +1,16 @@
-"""Built-in adapters for the Claude Code, Codex, and Gemini CLIs.
+"""Built-in adapters for the Claude Code, Codex, Gemini, and Copilot CLIs.
 
 Each adapter wraps the existing prompt builders (the ``*Agent`` classes) and the
 canonical command builders (``agent.cli_commands``), plus the agent-specific
 session-log location used by the post-hoc judge. Behaviour must stay identical
 to the pre-adapter dispatch in ``solve.py``; the equivalence tests pin this.
 
-Importing this module registers the three built-in adapters with the global
+Importing this module registers the built-in adapters with the global
 ``REGISTRY``.
 """
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -164,7 +165,52 @@ class GeminiAdapter(AgentAdapter):
         return stream if stream.exists() else None
 
 
+class CopilotAdapter(AgentAdapter):
+    name = "copilot"
+
+    def system_prompt(self, ctx: AgentRunContext) -> str:
+        return CodexAgent(model_name=ctx.model, mode=ctx.mode).build_system_prompt(_task_info(ctx))
+
+    def build_command(self, ctx: AgentRunContext) -> List[str]:
+        if ctx.is_resume:
+            raise ValueError("Copilot session resume is not supported by NatureBench")
+        return cc.build_copilot_cmd(ctx.system_prompt, ctx.model)
+
+    def extra_env(self, ctx: AgentRunContext) -> List[str]:
+        for key in ("COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"):
+            token = os.environ.get(key)
+            if token:
+                return [
+                    "-e", f"COPILOT_GITHUB_TOKEN={token}",
+                    "-e", "COPILOT_HOME=/tmp/naturebench-copilot",
+                ]
+        raise ValueError(
+            "Copilot requires COPILOT_GITHUB_TOKEN, GH_TOKEN, or GITHUB_TOKEN. "
+            "Use a fine-grained PAT with Copilot Requests permission or a supported OAuth token."
+        )
+
+    def transcript_path(self, task_out_dir: Path) -> Optional[Path]:
+        stream = task_out_dir / "copilot.jsonl"
+        return stream if stream.is_file() else None
+
+    def excerpt_transcript(
+        self,
+        log_path: Path,
+        *,
+        max_bytes: int = 2_000_000,
+        focus_start: Optional[float] = None,
+        focus_end: Optional[float] = None,
+    ) -> Optional[str]:
+        if max_bytes <= 0:
+            return ""
+        with log_path.open("rb") as stream:
+            stream.seek(0, os.SEEK_END)
+            stream.seek(max(0, stream.tell() - max_bytes))
+            return stream.read(max_bytes).decode("utf-8", errors="ignore")
+
+
 REGISTRY.register(ClaudeAdapter())
 REGISTRY.register(CodexAdapter())
 REGISTRY.register(CodexPlanningAdapter())
 REGISTRY.register(GeminiAdapter())
+REGISTRY.register(CopilotAdapter())

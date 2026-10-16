@@ -135,6 +135,23 @@ def build_codex_cmd(
     return cmd
 
 
+def build_copilot_cmd(system_prompt: str, model: str) -> List[str]:
+    """Build a non-interactive GitHub Copilot command for a task container."""
+    return [
+        "copilot", "-p", system_prompt,
+        "--model", model,
+        "--allow-all-tools",
+        "--allow-all-paths",
+        "--allow-all-urls",
+        "--add-dir", "/task",
+        "--disable-builtin-mcps",
+        "--excluded-tools", "web_fetch",
+        "--no-ask-user",
+        "--no-auto-update",
+        "--output-format", "json",
+    ]
+
+
 def codex_exec_cmd(base_cmd: List[str]) -> List[str]:
     """Run Codex with a dedicated HOME so auth lookup is explicit."""
     return ["env", f"HOME={_CODEX_HOME}", *base_cmd]

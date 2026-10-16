@@ -68,6 +68,33 @@ The evaluation service provides four commands for the agent:
 
 ---
 
+## GitHub Copilot CLI
+
+Select the built-in adapter with `--agent copilot --model <copilot-model-id>`.
+It uses your GitHub Copilot access and allowance, not OpenAI API billing.
+
+For headless authentication, set `COPILOT_GITHUB_TOKEN` in your host environment
+to a fine-grained PAT with **Copilot Requests** permission or a supported
+Copilot CLI / GitHub CLI OAuth token. `GH_TOKEN` and `GITHUB_TOKEN` are fallback
+sources, in that order. Classic PATs are not supported. Tokens must belong to an
+account with Copilot access; a GitHub token is not a general-purpose model API key.
+The adapter does not mount your host login state or use the host keychain.
+
+```bash
+python run_naturebench.py --agent copilot --model gpt-5.4 --tasks cpu
+```
+
+Rebuild the base image to include `@github/copilot`, or install it in a derived
+image and pass `--skip-build --base-image <your-image>`. Existing images do not
+gain the CLI automatically. The CLI runs non-interactively with task-file access
+and automatic tool, path, and URL approval inside the task container. Built-in
+MCP servers and the web-fetch tool are disabled; the standard prompt prohibits internet searches
+but this is not a network sandbox. Shell access remains available for evaluation
+and permitted dependencies. Output is saved to `copilot.jsonl`, which the judge
+receives as raw JSONL evidence, using the tail when the byte budget is exceeded.
+Timestamp-focused excerpts and session resume are not supported for this adapter;
+use `--force-fresh` to explicitly restart an interrupted run.
+
 ## Path A — protocol-only
 
 1. Download the task packages with the official script:
