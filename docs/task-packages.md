@@ -25,6 +25,15 @@ Task package fields:
 Some large tasks store visible data as `problem/data_archives/*.tar.gz` in the Hugging Face dataset. `run_naturebench.py` automatically extracts these archives after download so that every task exposes the same runtime path: `problem/data/`. After successful extraction, the local `problem/data_archives/`
 directory is removed to avoid keeping a second copy of the same data.
 
+By default, the launcher reuses locally prepared tasks and downloads only missing
+or incomplete packages. A task is considered prepared when `metadata.json`,
+`evaluation/evaluator.py`, an `environment/Dockerfile*`, and `problem/data/` exist,
+with no `problem/data_archives/*.tar.gz` left to extract. This is a layout check,
+not a checksum verification of every data file. Remove an incomplete task directory
+to download it again. An explicit `--dataset-revision` bypasses local reuse and
+checks all selected tasks against that revision. `--skip-download` still skips
+all downloading and archive extraction, including for missing tasks.
+
 ## Task Lists
 
 The root `task-set/` files define the 90-task Full track:

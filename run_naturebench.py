@@ -40,6 +40,16 @@ def _read_task_file(path: Path) -> list[str]:
     return tasks
 
 
+def _task_data_ready(task_dir: Path) -> bool:
+    return (
+        (task_dir / "metadata.json").is_file()
+        and (task_dir / "evaluation" / "evaluator.py").is_file()
+        and any(path.is_file() for path in (task_dir / "environment").glob("Dockerfile*"))
+        and (task_dir / "problem" / "data").is_dir()
+        and not any((task_dir / "problem" / "data_archives").glob("*.tar.gz"))
+    )
+
+
 def _download_dataset(
     dataset_id: str,
     data_dir: Path,
@@ -47,6 +57,17 @@ def _download_dataset(
     task_ids: list[str],
     dry_run: bool,
 ) -> None:
+    if revision is None:
+        pending_tasks = [
+            task_id for task_id in task_ids
+            if not _task_data_ready(data_dir / "tasks" / task_id)
+        ]
+        reused = len(task_ids) - len(pending_tasks)
+        if reused:
+            print(f"Reusing {reused} locally prepared task(s).", flush=True)
+        task_ids = pending_tasks
+    if not task_ids:
+        return
     # Download only the selected task packages (each tasks/<id>/** subtree, which
     # includes that task's licenses/ attribution). Repo-level README/LICENSE/manifest
     # are dataset-card files and are not fetched.

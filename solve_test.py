@@ -394,6 +394,33 @@ def test_cumulative_outputs_validate_complete_submission(monkeypatch, tmp_path):
     assert report.ok, report.errors
 
 
+@pytest.mark.parametrize("state", ["ready", "missing", "partial", "archived", "revision"])
+def test_wrapper_download_reuses_prepared_tasks(monkeypatch, tmp_path, state):
+    import run_naturebench as wrapper
+    snapshot_download = Mock()
+    monkeypatch.setitem(sys.modules, "huggingface_hub", Mock(snapshot_download=snapshot_download))
+    task = tmp_path / "tasks" / "existing"
+    if state != "missing":
+        write_json(task / "metadata.json", {})
+    if state in {"ready", "archived", "revision"}:
+        (task / "problem" / "data").mkdir(parents=True)
+        (task / "evaluation").mkdir()
+        (task / "evaluation" / "evaluator.py").write_text("")
+        (task / "environment").mkdir()
+        (task / "environment" / "Dockerfile.v3").write_text("")
+    if state == "archived":
+        (task / "problem" / "data_archives").mkdir()
+        (task / "problem" / "data_archives" / "part.tar.gz").write_bytes(b"")
+    revision = "new-revision" if state == "revision" else None
+    wrapper._download_dataset("dataset", tmp_path, revision, ["existing", "missing"], False)
+    expected = ["tasks/missing/**"] if state == "ready" else ["tasks/existing/**", "tasks/missing/**"]
+    assert snapshot_download.call_args.kwargs["allow_patterns"] == expected
+    if state == "ready":
+        snapshot_download.reset_mock()
+        wrapper._download_dataset("dataset", tmp_path, None, ["existing"], False)
+        snapshot_download.assert_not_called()
+
+
 @pytest.mark.parametrize("override", ["none", "forwarded", "file"])
 def test_wrapper_startup_honors_execution_overrides(monkeypatch, tmp_path, override):
     import run_naturebench as wrapper
