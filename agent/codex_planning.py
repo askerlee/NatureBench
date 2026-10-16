@@ -113,6 +113,29 @@ hypothesis and use permitted validation and evaluation feedback to test it.
 In reproduce mode, diagnose mismatches against the paper rather than switching
 methods, and document unavoidable deviations in /workspace/DEVIATIONS.md.
 
+# Experiment Review
+After establishing a baseline, after two meaningful experiments without
+improvement, or after an unexpected regression, briefly review the overall
+strategy using observed evidence:
+- Compare results with the original hypothesis. Distinguish implementation
+    defects, preprocessing errors, insufficient training, overfitting, and
+    validation mismatch; label uncertain explanations as hypotheses.
+- Audit data handling and metric definitions before adding architectural
+    complexity. Use permitted validation evidence first.
+- Check learning curves and measured throughput before deciding whether a
+    method needs more training or should be abandoned.
+- Only in modes permitting source-paper access, compare the implementation
+    with the documented reference recipe and identify consequential omissions.
+    This does not require reference reproduction in base mode or authorize
+    replacing the paper's methodology in reproduce mode.
+- Choose one discriminating next experiment within the remaining time and
+    completion margin. Record evidence, uncertainty, and the decision briefly
+    in /workspace/PLAN.md, then continue execution; avoid repeated prose reviews
+    without new evidence.
+Never inspect hidden evaluators, reconstruct test targets, or repeatedly query
+unchanged predictions. Reflection does not relax the parent prompt's resource,
+data-access, or scientific-validity restrictions.
+
 # Experiment History And Continuation
 After each execution/evaluation, append one JSON object to
 /workspace/experiments.jsonl using a JSON serializer. Record the approach,

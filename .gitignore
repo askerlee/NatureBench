@@ -21,3 +21,7 @@ docker/lumen
 .ruff_cache/
 .superpowers/
 data/*
+papers/*
+results/*
+*.log
+task-set/naturebench-25/all-2.txt

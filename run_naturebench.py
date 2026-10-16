@@ -241,7 +241,7 @@ def main() -> None:
     resume.add_argument("--resume-only", action="store_true")
     resume.add_argument("--force-fresh", nargs="*", default=[],
                         help="Archive and rerun these selected tasks, overriding automatic finished-task skipping.")
-    resume.add_argument("--force-fresh-task-file", default=None,
+    resume.add_argument("--force-fresh-task-file", default="./task-set/naturebench-25/all.txt",
                         help="File extending --force-fresh, not narrowing --tasks or final result coverage.")
 
     proxy = parser.add_argument_group("network proxy")

@@ -40,6 +40,19 @@ def test_prompt_preserves_parent_and_adds_planning(mode):
     assert "Inspect accelerator availability" in prompt
     assert "classical methods primarily as baselines, diagnostics, or fallbacks" in prompt
     assert "validated method regardless of hardware" in prompt
+    for instruction in (
+        "# Experiment Review",
+        "after two meaningful experiments without",
+        "after an unexpected regression",
+        "label uncertain explanations as hypotheses",
+        "Audit data handling and metric definitions",
+        "Check learning curves and measured throughput",
+        "Only in modes permitting source-paper access",
+        "does not require reference reproduction in base mode",
+        "Choose one discriminating next experiment",
+        "Never inspect hidden evaluators, reconstruct test targets",
+    ):
+        assert instruction in prompt
 
 
 @pytest.mark.parametrize("agent_class", [CodexAgent, CodexPlanningAgent])
@@ -166,6 +179,7 @@ def test_plan_only_prompt_uses_codex_heuristics(tmp_path, monkeypatch, mode):
     assert "never to reconstruct targets or tune output constants" in prompt
     assert "completion\nmargin" in prompt
     assert "# Planning-Only Scope" in prompt
+    assert "# Experiment Review" not in prompt
     assert "# Evaluation Service" not in prompt
     assert "# Session Rules" not in prompt
     assert ("Faithfully reproduce the supplied paper" in prompt) is (mode == "reproduce")
