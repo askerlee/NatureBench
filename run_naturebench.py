@@ -319,7 +319,14 @@ def main() -> None:
         args.force_fresh.extend(_read_task_file(Path(args.force_fresh_task_file).expanduser()))
 
     needs_execution = True
-    if args.ensure_base_image or args.start_eval_services:
+    selection_overridden = any(
+        arg.split("=")[0] in {
+            "--task-set", "--out-dir", "--resume-tasks", "--resume-task-file",
+            "--resume-only", "--force-fresh", "--config",
+        }
+        for arg in (args.solve_args or [])
+    )
+    if (args.ensure_base_image or args.start_eval_services) and not selection_overridden:
         from solve import _select_execution_tasks
         resume_set = set(args.resume_tasks)
         if args.resume_task_file:

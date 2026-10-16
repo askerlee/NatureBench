@@ -645,9 +645,10 @@ def _load_finished_result(
 
     # result.json is execution-only. A matching cumulative summary can contain
     # scores and judge output that were never written back to that file.
-    if all(saved.get(key) == result.get(key) for key in (
+    matching_summary = all(saved.get(key) == result.get(key) for key in (
         "task_name", "status", "returncode", "duration", "resume_history",
-    )):
+    ))
+    if matching_summary:
         for key in (
             "best_attempt", "best_aggregate_improvement",
             "best_per_instance_improvement", "best_raw_scores",
@@ -724,7 +725,14 @@ def _load_finished_result(
             )
 
     verdict_path = task_out_dir / "judge_verdict.json"
-    if verdict_path.exists():
+    # A resume can replace result.json without running the judge. In that case
+    # the older verdict file describes the previous execution, not this one.
+    if matching_summary and "judge" in saved:
+        result["judge"] = saved["judge"]
+    elif (
+        verdict_path.exists()
+        and verdict_path.stat().st_mtime_ns >= (task_out_dir / "result.json").stat().st_mtime_ns
+    ):
         result["judge"] = _read_saved_object(verdict_path)
     if result.get("judge") is not None:
         verdict = result["judge"]
@@ -2711,9 +2719,9 @@ def main() -> None:
     )
     parser.add_argument(
         "--resume-tasks", nargs="*", default=[],
-        help="Subset of tasks (by task_name) to run with `claude --resume <sid>` "
-             "instead of a fresh session. Each must already have "
-             "claude_session_id.txt and .claude_state/ from a prior run.",
+        help="Selected tasks to continue from their saved agent sessions, even "
+             "if already finished. Requires the agent's persisted session/state "
+             "and an external evaluator retaining the prior registration.",
     )
     parser.add_argument(
         "--resume-task-file", default=None,

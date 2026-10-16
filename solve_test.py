@@ -5,6 +5,7 @@ import copy
 import csv
 import importlib
 import json
+import os
 import sys
 from pathlib import Path
 from unittest.mock import Mock
@@ -151,6 +152,24 @@ def test_stale_summary_not_attached_to_new_execution(tmp_path):
     _, reused = solve._select_execution_tasks(["task"], tmp_path, set(), set())
     assert "best_aggregate_improvement" not in reused["task"]
     assert "judge" not in reused["task"]
+
+
+def test_old_judge_not_reused_after_unjudged_resume(tmp_path):
+    raw = finished(tmp_path, "task", resume_history=[
+        {"status": "success", "returncode": 0, "duration": 12.5},
+    ])
+    verdict_path = tmp_path / "task" / "judge_verdict.json"
+    write_json(verdict_path, {"is_valid": False, "reason": "previous execution"})
+    result_path = tmp_path / "task" / "result.json"
+    os.utime(verdict_path, ns=(1, 1))
+    write_json(tmp_path / "run_summary.json", {"results": [raw]})
+    _, reused = solve._select_execution_tasks(["task"], tmp_path, set(), set())
+    assert "judge" not in reused["task"]
+    assert result_path.stat().st_mtime_ns > verdict_path.stat().st_mtime_ns
+    saved = dict(raw, judge={"is_valid": True, "reason": "matching summary"})
+    write_json(tmp_path / "run_summary.json", {"results": [saved]})
+    _, reused = solve._select_execution_tasks(["task"], tmp_path, set(), set())
+    assert reused["task"]["judge"] == saved["judge"]
 
 
 @pytest.mark.parametrize("payload", ["{", '{"attempt":1}', '{"attempt":1,"aggregate_improvement":NaN}'])
@@ -375,7 +394,8 @@ def test_cumulative_outputs_validate_complete_submission(monkeypatch, tmp_path):
     assert report.ok, report.errors
 
 
-def test_wrapper_all_finished_does_not_start_services_or_build(monkeypatch, tmp_path):
+@pytest.mark.parametrize("override", ["none", "forwarded", "file"])
+def test_wrapper_startup_honors_execution_overrides(monkeypatch, tmp_path, override):
     import run_naturebench as wrapper
     tasks = tmp_path / "tasks.txt"
     tasks.write_text("task\n")
@@ -385,11 +405,22 @@ def test_wrapper_all_finished_does_not_start_services_or_build(monkeypatch, tmp_
     monkeypatch.setattr(wrapper, "_resolve_tasks_dir", lambda *_: data)
     calls = []
     monkeypatch.setattr(wrapper, "_run", lambda command, **kw: calls.append(command))
-    monkeypatch.setattr(sys, "argv", [
+    argv = [
         "run_naturebench.py", "--tasks", str(tasks), "--data-dir", str(data),
         "--out-dir", str(tmp_path / "out"), "--skip-download", "--ensure-base-image",
         "--start-eval-services", "--eval-env-mapping", "unused",
-    ])
+    ]
+    if override == "forwarded":
+        argv += ["--", "--force-fresh", "task"]
+    elif override == "file":
+        fresh_file = tmp_path / "fresh.txt"
+        fresh_file.write_text("task\n")
+        argv += ["--force-fresh-task-file", str(fresh_file)]
+    monkeypatch.setattr(sys, "argv", argv)
     wrapper.main()
-    assert len(calls) == 1
-    assert str(ROOT / "solve.py") in calls[0]
+    assert len(calls) == (1 if override == "none" else 3)
+    command = calls[-1]
+    assert str(ROOT / "solve.py") in command
+    assert command[command.index("--task-set") + 1] == str(tasks)
+    if override != "none":
+        assert command[command.index("--force-fresh") + 1] == "task"

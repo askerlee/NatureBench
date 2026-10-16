@@ -86,7 +86,8 @@ per-case evidence, including the two old tasks and all newly run tasks:
 - Copy per-case raw artifacts from both old and new tasks into
   `raw-results/<case_id>/`: `result.json`, `submissions.jsonl` when scored,
   `judge_verdict.json` for valid/invalid verdicts, and readable, non-empty
-  trajectories or execution logs covering the complete run history.
+  `trajectory.*` files covering the complete run history (copy execution logs
+  into that naming convention when needed).
 - Remove credentials, session authentication files, and tokens, including any
   embedded in logs or optional workspaces. Exclude archived task directories
   and unrelated directories; copy the required evidence, not the whole outdir.

@@ -20,8 +20,8 @@ run:
   skip_build: true
   base_image: naturebench-base:v3
   dockerfile_name: Dockerfile.v3
-  # Disable this and start_eval_services for an all-finished offline wrapper run;
-  # automatic wrapper suppression is planned.
+  # Image/service startup is suppressed when all selected tasks are finished.
+  # Use skip_download: true as well for an offline repeat run.
   ensure_base_image: true
 
   eval_port: null

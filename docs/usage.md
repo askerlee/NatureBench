@@ -309,7 +309,7 @@ These modes follow the state-handling rules below:
 
 A managed timeout is terminal budget exhaustion, not success or evidence of a score. A timed-out task counts as scored only if saved evaluator submissions contain a score.
 
-Skipped task artifacts are untouched: no agent, live evaluation, or judge calls are made for them. If all selected tasks are finished, `solve.py` rebuilds the cumulative summary offline and exits before authentication, GPU allocation, or service startup. Wrapper suppression of `--start-eval-services` and `--ensure-base-image` for this case is planned; until implemented, omit these flags (and disable their YAML equivalents) for an offline wrapper invocation.
+Skipped task artifacts are untouched: no agent, live evaluation, or judge calls are made for them. If all selected tasks are finished, `solve.py` rebuilds the cumulative summary offline and exits before authentication, GPU allocation, or service startup. The wrapper also suppresses `--start-eval-services` and `--ensure-base-image` in this case. Pass `--skip-download` to avoid dataset download checks in an offline wrapper invocation.
 
 ### More parameters
 
@@ -336,6 +336,6 @@ Batch-level summary is written to `--out-dir/run_summary.json`:
 | Batch | `total_tasks`; `successes`; `scored_tasks`; `skipped_tasks` (automatically skipped tasks); `average_best_aggregate_improvement` (scored tasks only); `total_duration` and `average_duration` (current invocation timing); `cumulative_task_duration` (sum of cumulative per-task durations). |
 | Per task | `status`; `duration` (cumulative solve time, including persisted resume history); `best_attempt`; `best_aggregate_improvement`; `best_raw_scores`; `total_attempts`; `judge` (saved judge results). |
 
-The cumulative summary covers the selected tasks in selection order, including skipped tasks. Saved scores and judge results are recovered offline from a matching prior summary, the local `submissions.jsonl` journal, and `judge_verdict.json`; missing evidence is not replaced by live calls. During execution, tasks not yet finished have pending placeholders rather than stale results from an earlier run.
+The cumulative summary covers the selected tasks in selection order, including skipped tasks. Saved scores and judge results are recovered offline from a matching prior summary, the local `submissions.jsonl` journal, and `judge_verdict.json`; missing evidence is not replaced by live calls. Without a matching summary verdict, only a verdict file at least as new as `result.json` is reused, so an unjudged resume cannot inherit a previous execution's verdict. Preserve file timestamps when relocating raw outputs. During execution, tasks not yet finished have pending placeholders rather than stale results from an earlier run.
 
 `run_summary.json` is not a submission package. For complete track coverage and per-case raw artifacts, follow the [submission guide](../submit-results/README.md).
