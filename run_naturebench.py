@@ -218,7 +218,7 @@ def main() -> None:
     agent.add_argument(
         "--agent",
         default="codex-planning",
-        help="Agent harness. Built-in: claude, codex, codex-planning, gemini, copilot. Custom agents "
+        help="Agent harness. Built-in: claude, codex, codex-planning, gemini, copilot, copilot-planning. Custom agents "
              "registered via the agent registry are also accepted (see "
              "docs/custom-agents.md). Required unless --download-only is used.",
     )

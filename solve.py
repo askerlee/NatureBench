@@ -2609,7 +2609,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--agent", default=None,
-        help="Agent to use. Built-in: claude, codex, codex-planning, gemini, copilot. Custom agents "
+        help="Agent to use. Built-in: claude, codex, codex-planning, gemini, copilot, copilot-planning. Custom agents "
              "registered via the agent registry are also accepted; an unknown "
              "name is rejected with the list of registered agents.",
     )

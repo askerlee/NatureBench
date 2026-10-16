@@ -84,6 +84,10 @@ The adapter does not mount your host login state or use the host keychain.
 python run_naturebench.py --agent copilot --model gpt-5.4 --tasks cpu
 ```
 
+Use `--agent copilot-planning` for the exact same prompt as `codex-planning`,
+with Copilot execution and authentication. Its transcript is saved to
+`copilot-planning.jsonl`; the same dependencies and resume limitations apply.
+
 Rebuild the base image to include `@github/copilot`, or install it in a derived
 image and pass `--skip-build --base-image <your-image>`. Existing images do not
 gain the CLI automatically. The CLI runs non-interactively with task-file access

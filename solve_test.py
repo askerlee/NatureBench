@@ -35,19 +35,22 @@ def test_copilot_command():
 
 
 @pytest.mark.parametrize("mode", ["base", "reproduce"])
-def test_copilot_adapter_prompt_and_dispatch(mode):
+@pytest.mark.parametrize("agent_name", ["copilot", "copilot-planning"])
+def test_copilot_adapter_prompt_and_dispatch(mode, agent_name):
     from agent.adapter import AgentRunContext, REGISTRY
     from agent.codex import CodexAgent
+    from agent.codex_planning import CodexPlanningAgent
     from agent.cli_commands import build_copilot_cmd
 
-    adapter = REGISTRY.get("copilot")
+    adapter = REGISTRY.get(agent_name)
     context = AgentRunContext(
         system_prompt="", model="test-model", mode=mode,
         eval_service_url="http://evaluation:8321", eval_token="opaque-token",
         time_limit_minutes=30,
     )
     context.system_prompt = adapter.system_prompt(context)
-    assert context.system_prompt == CodexAgent("test-model", mode=mode).build_system_prompt({
+    prompt_agent = CodexPlanningAgent if agent_name == "copilot-planning" else CodexAgent
+    assert context.system_prompt == prompt_agent("test-model", mode=mode).build_system_prompt({
         "eval_service_url": context.eval_service_url,
         "eval_token": context.eval_token,
         "time_limit_minutes": 30,
@@ -58,14 +61,30 @@ def test_copilot_adapter_prompt_and_dispatch(mode):
         adapter.build_command(context)
 
 
+@pytest.mark.parametrize("mode", ["base", "reproduce", "reference", "legacy_base"])
+@pytest.mark.parametrize("is_resume", [False, True])
+def test_copilot_planning_prompt_matches_codex_planning(mode, is_resume):
+    from agent.adapter import AgentRunContext, REGISTRY
+
+    context = AgentRunContext(
+        system_prompt="", model="test-model", mode=mode, is_resume=is_resume,
+        eval_service_url="http://evaluation:8321", eval_token="opaque-token",
+        time_limit_minutes=30,
+    )
+    assert REGISTRY.get("copilot-planning").system_prompt(context) == (
+        REGISTRY.get("codex-planning").system_prompt(context)
+    )
+
+
 @pytest.mark.parametrize("key", ["COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"])
-def test_copilot_token_forwarding(monkeypatch, key):
+@pytest.mark.parametrize("agent_name", ["copilot", "copilot-planning"])
+def test_copilot_token_forwarding(monkeypatch, key, agent_name):
     from agent.adapter import AgentRunContext, REGISTRY
 
     for variable in ("COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"):
         monkeypatch.delenv(variable, raising=False)
     context = AgentRunContext(system_prompt="prompt", model="test-model")
-    adapter = REGISTRY.get("copilot")
+    adapter = REGISTRY.get(agent_name)
     with pytest.raises(ValueError, match="Copilot requires"):
         adapter.extra_env(context)
     monkeypatch.setenv(key, "test-token")
@@ -78,12 +97,13 @@ def test_copilot_token_forwarding(monkeypatch, key):
     assert adapter.docker_mounts(context) == []
 
 
-def test_copilot_transcript(tmp_path):
+@pytest.mark.parametrize("agent_name", ["copilot", "copilot-planning"])
+def test_copilot_transcript(tmp_path, agent_name):
     from agent.adapter import REGISTRY
 
-    adapter = REGISTRY.get("copilot")
+    adapter = REGISTRY.get(agent_name)
     assert adapter.transcript_path(tmp_path) is None
-    log = tmp_path / "copilot.jsonl"
+    log = tmp_path / f"{agent_name}.jsonl"
     content = '{"type":"assistant.message","data":{"content":"measured result"}}\n'
     log.write_text(content, encoding="utf-8")
     assert adapter.transcript_path(tmp_path) == log

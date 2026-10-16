@@ -190,7 +190,7 @@ class CopilotAdapter(AgentAdapter):
         )
 
     def transcript_path(self, task_out_dir: Path) -> Optional[Path]:
-        stream = task_out_dir / "copilot.jsonl"
+        stream = task_out_dir / f"{self.name}.jsonl"
         return stream if stream.is_file() else None
 
     def excerpt_transcript(
@@ -209,8 +209,16 @@ class CopilotAdapter(AgentAdapter):
             return stream.read(max_bytes).decode("utf-8", errors="ignore")
 
 
+class CopilotPlanningAdapter(CopilotAdapter):
+    name = "copilot-planning"
+
+    def system_prompt(self, ctx: AgentRunContext) -> str:
+        return CodexPlanningAdapter().system_prompt(ctx)
+
+
 REGISTRY.register(ClaudeAdapter())
 REGISTRY.register(CodexAdapter())
 REGISTRY.register(CodexPlanningAdapter())
 REGISTRY.register(GeminiAdapter())
 REGISTRY.register(CopilotAdapter())
+REGISTRY.register(CopilotPlanningAdapter())
