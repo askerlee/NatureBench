@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import math
 import os
 import platform
 import queue
@@ -44,6 +45,8 @@ from eval_service import (
     CONTROL_TOKEN_HEADER,
     DEFAULT_CONTROL_TOKEN_PATH,
     ScoreTracker,
+    SubmissionRecord,
+    TaskState,
     load_or_create_control_token,
     start_server_background,
 )
@@ -587,22 +590,195 @@ def _capture_gemini_session_id(jsonl_path: Path) -> Optional[str]:
 
 def _has_prior_state(task_out_dir: Path) -> bool:
     """Return True if the task directory already contains state from a prior run."""
-    for name in (
-        "result.json",
-        "submissions.jsonl",
-        "claude_session_id.txt",
-        ".claude_state",
-        "codex_session_id.txt",
-        ".codex_state",
-        "claude.jsonl",
-        "claude.err",
-        "codex.jsonl",
-        "codex.err",
-        "judge_verdict.json",
+    return task_out_dir.exists() and (
+        not task_out_dir.is_dir()
+        or any(not p.name.startswith("_force_fresh_archive_")
+               for p in task_out_dir.iterdir())
+    )
+
+
+def _read_saved_object(path: Path) -> Dict[str, Any]:
+    if not path.exists():
+        return {}
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(value, dict):
+            raise ValueError("expected a JSON object")
+        return value
+    except (OSError, ValueError) as exc:
+        raise ValueError(f"Cannot reuse saved state {path}: {exc}") from exc
+
+
+def _load_finished_result(
+    task_name: str, task_out_dir: Path, saved: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
+    """Reuse only a normal exit or a managed timeout, independently of score."""
+    result = _read_saved_object(task_out_dir / "result.json")
+    duration = result.get("duration")
+    if (
+        result.get("task_name") != task_name
+        or (result.get("status"), result.get("returncode"))
+        not in (("success", 0), ("timeout", -1))
+        or isinstance(result.get("returncode"), bool)
+        or not isinstance(result.get("returncode"), int)
+        or isinstance(duration, bool)
+        or not isinstance(duration, (int, float))
+        or not math.isfinite(duration)
+        or duration < 0
     ):
-        if (task_out_dir / name).exists():
-            return True
-    return False
+        return None
+    if "resume_history" in result:
+        history = result["resume_history"]
+        if not isinstance(history, list) or not history:
+            return None
+        for entry in history:
+            if not isinstance(entry, dict):
+                return None
+            elapsed = entry.get("duration")
+            if (
+                isinstance(elapsed, bool) or not isinstance(elapsed, (int, float))
+                or not math.isfinite(elapsed) or elapsed < 0
+            ):
+                return None
+        if any(history[-1].get(key) != result[key] for key in ("status", "returncode")):
+            return None
+
+    # result.json is execution-only. A matching cumulative summary can contain
+    # scores and judge output that were never written back to that file.
+    if all(saved.get(key) == result.get(key) for key in (
+        "task_name", "status", "returncode", "duration", "resume_history",
+    )):
+        for key in (
+            "best_attempt", "best_aggregate_improvement",
+            "best_per_instance_improvement", "best_raw_scores",
+            "total_attempts", "judge", "effective_improvement",
+        ):
+            if key in saved:
+                result[key] = saved[key]
+
+    cached_score = result.get("best_aggregate_improvement")
+    if cached_score is not None and (
+        isinstance(cached_score, bool) or not isinstance(cached_score, (int, float))
+        or not math.isfinite(cached_score)
+    ):
+        raise ValueError(f"Cannot reuse malformed saved score for {task_name}")
+    for key in ("best_attempt", "total_attempts"):
+        value = result.get(key)
+        if value is not None and (
+            isinstance(value, bool) or not isinstance(value, int)
+            or value < (1 if key == "best_attempt" else 0)
+        ):
+            raise ValueError(f"Cannot reuse malformed {key} for {task_name}")
+    for key in ("best_raw_scores", "best_per_instance_improvement"):
+        if key in result and not isinstance(result[key], dict):
+            raise ValueError(f"Cannot reuse malformed {key} for {task_name}")
+
+    journal = task_out_dir / "submissions.jsonl"
+    if journal.exists():
+        state = TaskState(task_name=task_name, data_dir=task_out_dir)
+        try:
+            for line in journal.read_text(encoding="utf-8").splitlines():
+                if not line.strip():
+                    continue
+                rec = json.loads(line)
+                if not isinstance(rec, dict) or rec.get("type") not in ("success", "failure"):
+                    raise ValueError("invalid submission record")
+                score = rec["aggregate_improvement"]
+                if score is not None and (
+                    isinstance(score, bool) or not isinstance(score, (int, float))
+                    or not math.isfinite(score)
+                ):
+                    raise ValueError("non-finite or non-numeric score")
+                attempt = rec["attempt"]
+                if isinstance(attempt, bool) or not isinstance(attempt, int) or attempt < 1:
+                    raise ValueError("invalid attempt number")
+                if rec.get("type") == "failure" and score is not None:
+                    raise ValueError("failure record has a score")
+                for key in ("raw_scores", "per_instance_improvement"):
+                    if rec.get(key) is not None and not isinstance(rec[key], dict):
+                        raise ValueError(f"invalid {key}")
+                state.record(SubmissionRecord(
+                    attempt=attempt, aggregate_improvement=score,
+                    raw_scores=rec.get("raw_scores") or {},
+                    per_instance_improvement=rec.get("per_instance_improvement") or {},
+                ))
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            raise ValueError(f"Cannot reuse saved attempts {journal}: {exc}") from exc
+        result["total_attempts"] = max(
+            result.get("total_attempts") or 0, len(state.submissions),
+        )
+        best = next(
+            (rec for rec in state.submissions
+             if rec.attempt == state.best_attempt
+             and rec.aggregate_improvement == state.best_aggregate_improvement),
+            None,
+        )
+        if best is not None and (
+            cached_score is None or best.aggregate_improvement >= cached_score
+        ):
+            result.update(
+                best_attempt=best.attempt,
+                best_aggregate_improvement=best.aggregate_improvement,
+                best_per_instance_improvement=best.per_instance_improvement,
+                best_raw_scores=best.raw_scores,
+            )
+
+    verdict_path = task_out_dir / "judge_verdict.json"
+    if verdict_path.exists():
+        result["judge"] = _read_saved_object(verdict_path)
+    if result.get("judge") is not None:
+        verdict = result["judge"]
+        if not isinstance(verdict, dict) or "is_valid" not in verdict or (
+            verdict["is_valid"] is not None and type(verdict["is_valid"]) is not bool
+        ):
+            raise ValueError(f"Cannot reuse malformed judge verdict for {task_name}")
+        result["effective_improvement"] = (
+            None if result["judge"].get("is_valid") is False
+            else result.get("best_aggregate_improvement")
+        )
+    return result
+
+
+def _select_execution_tasks(
+    tasks: List[str], out_dir: Path, resume_set: Set[str], force_fresh_set: Set[str],
+) -> Tuple[List[str], Dict[str, Dict[str, Any]]]:
+    """Partition selected tasks without modifying artifacts or contacting services."""
+    overlap = resume_set & force_fresh_set
+    if overlap:
+        raise ValueError(f"--resume-tasks and --force-fresh overlap on: {sorted(overlap)}")
+    tasks = list(dict.fromkeys(tasks))
+    summary = (
+        _read_saved_object(out_dir / "run_summary.json")
+        if any(tn not in resume_set | force_fresh_set for tn in tasks) else {}
+    )
+    if not isinstance(summary.get("results", []), list):
+        raise ValueError(f"Cannot reuse malformed results in {out_dir / 'run_summary.json'}")
+    saved_results = {
+        r["task_name"]: r for r in summary.get("results", [])
+        if isinstance(r, dict) and isinstance(r.get("task_name"), str)
+    }
+    reused: Dict[str, Dict[str, Any]] = {}
+    ambiguous = []
+    for tn in tasks:
+        if tn in resume_set or tn in force_fresh_set:
+            continue
+        result = _load_finished_result(tn, out_dir / tn, saved_results.get(tn, {}))
+        if result is not None:
+            reused[tn] = result
+        elif _has_prior_state(out_dir / tn) or tn in saved_results:
+            ambiguous.append(tn)
+    if ambiguous:
+        raise ValueError(
+            f"{len(ambiguous)} task(s) have incomplete or ambiguous prior state under "
+            f"{out_dir} (examples: {ambiguous[:5]}). Re-run with --resume-tasks "
+            "<names> to continue them, or --force-fresh <names> to archive prior "
+            "state and start over."
+        )
+    execution_tasks = [tn for tn in tasks if tn not in reused]
+    logger.info("Selected %d task(s): %s", len(tasks), tasks)
+    logger.info("Skipped %d finished task(s): %s", len(reused), list(reused))
+    logger.info("To run %d task(s): %s", len(execution_tasks), execution_tasks)
+    return execution_tasks, reused
 
 
 def _load_or_create_eval_token(
@@ -2182,9 +2358,21 @@ def _build_summary(
         "average_best_aggregate_improvement": avg_agg,
         "total_duration": total_duration,
         "average_duration": total_duration / len(results) if results else 0,
+        "cumulative_task_duration": sum(r.get("duration") or 0 for r in results),
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "results": results,
     }
+
+
+def _write_summary(
+    summary_path: Path, results: List[Dict[str, Any]],
+    tracker: ScoreTracker, total_start: float, skipped_tasks: List[str],
+) -> None:
+    summary = _build_summary(results, tracker, time.time() - total_start)
+    summary["skipped_tasks"] = skipped_tasks
+    tmp_path = summary_path.with_suffix(".json.tmp")
+    tmp_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
+    tmp_path.replace(summary_path)
 
 
 # ---------------------------------------------------------------------------
@@ -2542,9 +2730,10 @@ def main() -> None:
         help="Task names to forcibly run from scratch even if their "
              "task_out_dir already contains a previous result. Existing state "
              "(result.json, submissions.jsonl, .claude_state, etc.) is moved "
-             "to _force_fresh_archive_<ts>/ — nothing is deleted. Without this "
-             "flag, encountering a prior result.json on a non-resume task is "
-             "an error (use --resume-tasks or --force-fresh to choose).",
+             "to _force_fresh_archive_<ts>/ — nothing is deleted. By default, "
+             "finished tasks (success/0 or managed timeout/-1, with valid "
+             "execution metadata) are skipped and their saved results reused. "
+             "Incomplete/ambiguous state still requires resume or force-fresh.",
     )
     parser.add_argument(
         "--gpu-pool-file", default=None,
@@ -2616,6 +2805,39 @@ def main() -> None:
     skip_judge = bool(getattr(args, "skip_judge", False))
     base_image = getattr(args, "base_image", "naturebench-base:v3")
     dockerfile_name = getattr(args, "dockerfile_name", "Dockerfile.v3")
+
+    total_start = time.time()
+    tasks = list(dict.fromkeys(_read_task_set(task_file)))
+    resume_set: Set[str] = set(getattr(args, "resume_tasks", []) or [])
+    rt_file = getattr(args, "resume_task_file", None)
+    if rt_file:
+        rtp = Path(rt_file).resolve()
+        if rtp.exists():
+            resume_set.update(_read_task_set(rtp))
+        else:
+            logger.warning("resume task file not found: %s", rtp)
+    if agent_name not in ("claude", "codex", "codex-planning", "gemini") and resume_set:
+        raise ValueError("--resume-tasks/--resume-task-file are only supported when --agent is claude, codex, codex-planning, or gemini")
+    resume_only = bool(getattr(args, "resume_only", False))
+    force_fresh_set: Set[str] = set(getattr(args, "force_fresh", []) or [])
+    if resume_only:
+        unknown = sorted(resume_set - set(tasks))
+        if unknown:
+            logger.warning("resume_only mode: tasks not in --task-set, skipped: %s", unknown)
+        tasks = [t for t in tasks if t in resume_set]
+        if not tasks:
+            raise ValueError("--resume-only with no eligible tasks in --task-set")
+    execution_tasks, reused_results = _select_execution_tasks(
+        tasks, out_dir, resume_set, force_fresh_set,
+    )
+    if not execution_tasks:
+        out_dir.mkdir(parents=True, exist_ok=True)
+        _write_summary(
+            out_dir / "run_summary.json", list(reused_results.values()),
+            ScoreTracker(), total_start, list(reused_results),
+        )
+        print(f"All {len(tasks)} selected tasks already finished. Results saved to {out_dir / 'run_summary.json'}")
+        return
 
     # GPU pool: in-memory single-process or cross-process file-locked.
     gpu_devices_str = getattr(args, "gpu_devices", None)
@@ -2798,69 +3020,12 @@ def main() -> None:
                 proxy_socks_port=proxy_socks_port,
             )
 
-    tasks = _read_task_set(task_file)
-
-    # --- Resume selection (manual, per-task) ---
-    resume_set: set = set(getattr(args, "resume_tasks", []) or [])
-    if agent_name not in ("claude", "codex", "codex-planning", "gemini") and resume_set:
-        raise ValueError("--resume-tasks is only supported when --agent is claude, codex, codex-planning, or gemini")
-    rt_file = getattr(args, "resume_task_file", None)
-    if rt_file:
-        rtp = Path(rt_file).resolve()
-        if rtp.exists():
-            for line in rtp.read_text(encoding="utf-8").splitlines():
-                t = line.strip()
-                if t and not t.startswith("#"):
-                    resume_set.add(t)
-        else:
-            logger.warning("resume task file not found: %s", rtp)
-    if agent_name not in ("claude", "codex", "codex-planning", "gemini") and resume_set:
-        raise ValueError("--resume-tasks/--resume-task-file are only supported when --agent is claude, codex, codex-planning, or gemini")
-    resume_only = bool(getattr(args, "resume_only", False))
-    force_fresh_set: set = set(getattr(args, "force_fresh", []) or [])
-
-    if resume_only:
-        unknown = sorted(resume_set - set(tasks))
-        if unknown:
-            logger.warning(
-                "resume_only mode: %d task(s) not in --task-set, skipped: %s",
-                len(unknown), unknown[:5],
-            )
-        tasks = [t for t in tasks if t in resume_set]
-        if not tasks:
-            raise ValueError("--resume-only with no eligible tasks in --task-set")
-
-    # --- Refuse-on-prior-state gate (mode A) ---
-    # Any task that is NOT listed in --resume-tasks but already has prior state
-    # in its task_out_dir is ambiguous: did the user mean to resume it, or to
-    # overwrite it? Refuse instead of silently doing either.
-    overlap = resume_set & force_fresh_set
-    if overlap:
-        raise ValueError(
-            f"--resume-tasks and --force-fresh overlap on: {sorted(overlap)}"
-        )
-    ambiguous: List[str] = []
-    for tn in tasks:
-        if tn in resume_set or tn in force_fresh_set:
-            continue
-        if _has_prior_state(out_dir / tn):
-            ambiguous.append(tn)
-    if ambiguous:
-        sample = ambiguous[:5]
-        raise ValueError(
-            f"{len(ambiguous)} task(s) already have prior state under "
-            f"{out_dir} but were not listed in --resume-tasks or --force-fresh "
-            f"(examples: {sample}). Re-run with --resume-tasks <names> to "
-            f"continue them, or --force-fresh <names> to discard prior state "
-            f"and start over."
-        )
-
     # Validate every resume request before any eval-service registration or
     # Docker launch. In external mode, POST /register would otherwise recreate
     # missing task state after an eval-service restart and make an invalid
     # resume look eligible.
     resume_errors: List[str] = []
-    for tn in tasks:
+    for tn in execution_tasks:
         if tn not in resume_set:
             continue
         ok, reason = _resume_eligible(out_dir / tn, agent_name)
@@ -2929,7 +3094,7 @@ def main() -> None:
 
     if use_external_eval:
         # External mode: register tasks with the correct eval service
-        for task_name in tasks:
+        for task_name in execution_tasks:
             task_path = data_dir / task_name
             if not task_path.exists():
                 logger.warning("Task data directory not found: %s", task_path)
@@ -2981,7 +3146,7 @@ def main() -> None:
                 }
     else:
         # Internal mode: start eval service in this process
-        for task_name in tasks:
+        for task_name in execution_tasks:
             task_path = data_dir / task_name
             if task_path.exists():
                 task_out_dir = out_dir / task_name
@@ -3018,13 +3183,18 @@ def main() -> None:
     eval_batch_name = _select_eval_batch_name(use_external_eval, out_dir)
 
     # --- Run tasks ---
-    total_start = time.time()
-    results: List[Dict[str, Any]] = []
+    results_by_task = {
+        tn: reused_results.get(tn, {"task_name": tn, "status": "pending", "duration": 0})
+        for tn in tasks
+    }
+    results: List[Dict[str, Any]] = list(results_by_task.values())
     results_lock = threading.Lock()
     summary_path = out_dir / "run_summary.json"
 
     def _enrich_result(r: Dict[str, Any]) -> None:
         """Enrich a single result with scores from eval service."""
+        if r["task_name"] in reused_results or r["task_name"] not in eval_tokens:
+            return
         if use_external_eval:
             tn = r["task_name"]
             port = task_port_map.get(tn, default_eval_port)
@@ -3042,20 +3212,16 @@ def main() -> None:
 
     def _flush_summary() -> None:
         """Write current results to run_summary.json (caller must hold results_lock)."""
-        total_duration = time.time() - total_start
-        summary = _build_summary(list(results), tracker, total_duration)
-        tmp_path = summary_path.with_suffix(".json.tmp")
-        tmp_path.write_text(
-            json.dumps(summary, indent=2, ensure_ascii=False),
-            encoding="utf-8",
+        _write_summary(
+            summary_path, list(results), tracker, total_start, list(reused_results),
         )
-        tmp_path.replace(summary_path)
 
     def _record_result(r: Dict[str, Any]) -> None:
         """Enrich, append, and flush a completed task result."""
         _enrich_result(r)
         with results_lock:
-            results.append(r)
+            results_by_task[r["task_name"]] = r
+            results[:] = results_by_task.values()
             _flush_summary()
 
     def _get_score_str(task_name: str) -> str:
@@ -3073,10 +3239,12 @@ def main() -> None:
         return "N/A"
 
     try:
+        with results_lock:
+            _flush_summary()
         # Record pre-rejected tasks (metadata incomplete, register failed) first.
         for task_name, r in pre_reject.items():
             _record_result(r)
-        runnable_tasks = [t for t in tasks if t not in pre_reject]
+        runnable_tasks = [t for t in execution_tasks if t not in pre_reject]
 
         # Helper: decide if a runnable task should be launched as a resume.
         def _decide_resume(task_name: str) -> bool:
@@ -3221,6 +3389,8 @@ def main() -> None:
             judge_targets: List[Tuple[str, Path]] = []
             for r in results:
                 tn = r.get("task_name")
+                if tn in reused_results:
+                    continue
                 if tn is None:
                     continue
                 if r.get("best_aggregate_improvement") is None:
@@ -3235,7 +3405,9 @@ def main() -> None:
                     max_workers=min(4, len(judge_targets)),
                     data_dir=data_dir,
                 )
-            apply_verdicts_to_results(results, verdicts)
+            apply_verdicts_to_results(
+                [r for r in results if r["task_name"] not in reused_results], verdicts,
+            )
         except Exception as e:
             logger.exception("Judge stage failed: %s", e)
 

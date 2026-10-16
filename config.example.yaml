@@ -5,6 +5,7 @@ run:
   skip_download: false
   download_only: false
 
+  # Keep the full selection here; resume/fresh lists below choose actions, not coverage.
   tasks: gpu_low
   out_dir: ./results/claude_<model-name>_gpu_low
   dry_run: false
@@ -19,6 +20,8 @@ run:
   skip_build: true
   base_image: naturebench-base:v3
   dockerfile_name: Dockerfile.v3
+  # Disable this and start_eval_services for an all-finished offline wrapper run;
+  # automatic wrapper suppression is planned.
   ensure_base_image: true
 
   eval_port: null
@@ -46,8 +49,14 @@ run:
   codex_auth_dir: null
   codex_auth_mode: null
 
+  # Finished tasks auto-skip only with matching result.json task_name, finite
+  # nonnegative duration, and success/returncode 0 or managed timeout/returncode -1.
+  # Timeout exhausts the budget; it does not imply success or a score.
+  # error/agent_error/killed/eval_skip/malformed prior state needs resume or fresh.
+  # Explicit resume/fresh override skipping; overlapping lists are rejected.
   resume_tasks: []
   resume_task_file: null
+  # true intentionally narrows coverage to the resume list.
   resume_only: false
   force_fresh: []
   force_fresh_task_file: null

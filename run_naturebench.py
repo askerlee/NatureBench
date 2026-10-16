@@ -186,7 +186,8 @@ def main() -> None:
         help=(
             "Task selection. Use one of all/cpu/gpu_high/gpu_low, or pass a "
             "custom task-set file path. The wrapper converts this to solve.py "
-            "--task-set internally."
+            "--task-set internally. Keep the full track selected: finished "
+            "tasks are skipped by default but retained in cumulative results."
         ),
     )
     run.add_argument("--out-dir", default="./results/codex_planning_25")
@@ -238,8 +239,10 @@ def main() -> None:
     resume.add_argument("--resume-tasks", nargs="*", default=[])
     resume.add_argument("--resume-task-file", default=None)
     resume.add_argument("--resume-only", action="store_true")
-    resume.add_argument("--force-fresh", nargs="*", default=[])
-    resume.add_argument("--force-fresh-task-file", default=None)
+    resume.add_argument("--force-fresh", nargs="*", default=[],
+                        help="Archive and rerun these selected tasks, overriding automatic finished-task skipping.")
+    resume.add_argument("--force-fresh-task-file", default=None,
+                        help="File extending --force-fresh, not narrowing --tasks or final result coverage.")
 
     proxy = parser.add_argument_group("network proxy")
     proxy.add_argument("--proxy-mode", choices=["host", "sidecar", "embedded", "none"], default="none")
@@ -315,11 +318,25 @@ def main() -> None:
     if args.force_fresh_task_file:
         args.force_fresh.extend(_read_task_file(Path(args.force_fresh_task_file).expanduser()))
 
-    if args.ensure_base_image:
+    needs_execution = True
+    if args.ensure_base_image or args.start_eval_services:
+        from solve import _select_execution_tasks
+        resume_set = set(args.resume_tasks)
+        if args.resume_task_file:
+            resume_path = Path(args.resume_task_file).expanduser()
+            if resume_path.exists():
+                resume_set.update(_read_task_file(resume_path))
+        coverage = [t for t in selected_tasks if not args.resume_only or t in resume_set]
+        execution_tasks, _ = _select_execution_tasks(
+            coverage, out_dir, resume_set, set(args.force_fresh),
+        )
+        needs_execution = bool(execution_tasks)
+
+    if args.ensure_base_image and needs_execution:
         _run(["bash", str(root / "scripts" / "ensure_naturebench_base.sh")], cwd=root, dry_run=args.dry_run)
 
     mapping_path = Path(args.eval_env_mapping).expanduser().resolve() if args.eval_env_mapping else None
-    if args.start_eval_services:
+    if args.start_eval_services and needs_execution:
         if mapping_path is None:
             raise SystemExit("--start-eval-services requires --eval-env-mapping.")
         cmd = ["bash", str(root / "scripts" / "start_eval_services.sh"), str(mapping_path)]

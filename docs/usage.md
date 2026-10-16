@@ -96,7 +96,7 @@ python run_naturebench.py \
   --resume-only
 ```
 
-Without `--resume-only`, the script resumes tasks listed in the resume list and tries to fresh-run other remaining tasks in the same task set. If those other tasks already have prior state and are not listed in `--resume-tasks` or `--force-fresh`, the pipeline errors out to avoid accidental overwrite.
+Without `--resume-only`, the full selected task set is retained: listed tasks resume, finished tasks are automatically skipped, and tasks without prior state start fresh. Other tasks with prior state require explicit resume or force-fresh to avoid accidental overwrite.
 
 You can also list tasks in a file:
 
@@ -105,6 +105,18 @@ python run_naturebench.py ... \
   --resume-task-file ./resume_tasks.txt \
   --resume-only
 ```
+
+To retain full batch coverage, keep `--tasks` pointing to the full selected task file and use separate, non-overlapping action lists:
+
+```bash
+python run_naturebench.py ... \
+  --tasks ./task-set/naturebench-25/all.txt \
+  --out-dir ./results/my_run \
+  --resume-task-file ./resume_tasks.txt \
+  --force-fresh-task-file ./fresh_tasks.txt
+```
+
+`--resume-only` intentionally narrows coverage to the resume list; it is not a way to preserve the full batch summary.
 
 ## Parameter Usage
 
@@ -168,7 +180,7 @@ If you do not want the current directory's `config.yaml` to be read automaticall
 
 Each task's session, workspace, submissions, and results are written under `--out-dir/<case_id>/`. The evaluation service derives its batch name from the final output directory's last path component.
 
-When reusing the same `--out-dir`, tasks with prior state require an explicit choice between `--resume-tasks` and `--force-fresh`; this avoids accidental overwrites.
+When reusing the same `--out-dir`, finished tasks are automatically skipped unless explicitly resumed or forced fresh. Other tasks with prior state require an explicit choice between resume and force-fresh.
 
 ### Agent And Mode
 
@@ -287,12 +299,17 @@ These modes follow the state-handling rules below:
 | Rule | Behavior |
 |---|---|
 | Default fresh run | Tasks with no prior state start a new agent session. |
-| Fresh meets prior state | If any task already has `result.json`, `submissions.jsonl`, agent session/state, or logs, `solve.py` errors out before any task starts and stops the whole run. |
+| Automatic skip | Only a valid `result.json` with matching `task_name`, finite nonnegative `duration`, and either `status: success` / `returncode: 0` or managed `status: timeout` / `returncode: -1` is finished. |
+| Unfinished prior state | `error`, `agent_error`, `killed`, `eval_skip`, malformed results, or other prior state require explicit resume or force-fresh; otherwise preflight rejects the run. |
 | Output directory | Both resume and force-fresh must explicitly pass the same `--out-dir` used by the original run. |
 | Resume eligibility | Requires complete previous task output plus the corresponding agent session and state files. |
 | `--resume-only` | Runs only tasks in the resume list; without it, the task set's other tasks are processed too. |
 | force-fresh scope | Applies only to tasks that are both in current `--tasks` and listed in `--force-fresh`; there is no `--force-fresh-only`. |
-| resume + force-fresh | Can be combined in one command, but not for the same task. Other tasks run fresh. |
+| Explicit overrides | Resume and force-fresh override automatic skipping. They can be combined for distinct tasks; overlapping lists are rejected. Other tasks are automatically skipped if finished, or start fresh if no prior state exists. |
+
+A managed timeout is terminal budget exhaustion, not success or evidence of a score. A timed-out task counts as scored only if saved evaluator submissions contain a score.
+
+Skipped task artifacts are untouched: no agent, live evaluation, or judge calls are made for them. If all selected tasks are finished, `solve.py` rebuilds the cumulative summary offline and exits before authentication, GPU allocation, or service startup. Wrapper suppression of `--start-eval-services` and `--ensure-base-image` for this case is planned; until implemented, omit these flags (and disable their YAML equivalents) for an offline wrapper invocation.
 
 ### More parameters
 
@@ -316,5 +333,9 @@ Batch-level summary is written to `--out-dir/run_summary.json`:
 
 | Scope | Contents |
 |---|---|
-| Batch | `total_tasks`; `successes` (tasks whose return code is success); `scored_tasks` (tasks whose submissions produced a score); `average_best_aggregate_improvement` (averaged only over scored tasks); `total_duration` (elapsed time for the full batch run). |
-| Per task | `status`; `duration` (elapsed time for the individual task run); `best_attempt`; `best_aggregate_improvement`; `best_raw_scores`; `total_attempts`; `judge` (judge results). |
+| Batch | `total_tasks`; `successes`; `scored_tasks`; `skipped_tasks` (automatically skipped tasks); `average_best_aggregate_improvement` (scored tasks only); `total_duration` and `average_duration` (current invocation timing); `cumulative_task_duration` (sum of cumulative per-task durations). |
+| Per task | `status`; `duration` (cumulative solve time, including persisted resume history); `best_attempt`; `best_aggregate_improvement`; `best_raw_scores`; `total_attempts`; `judge` (saved judge results). |
+
+The cumulative summary covers the selected tasks in selection order, including skipped tasks. Saved scores and judge results are recovered offline from a matching prior summary, the local `submissions.jsonl` journal, and `judge_verdict.json`; missing evidence is not replaced by live calls. During execution, tasks not yet finished have pending placeholders rather than stale results from an earlier run.
+
+`run_summary.json` is not a submission package. For complete track coverage and per-case raw artifacts, follow the [submission guide](../submit-results/README.md).
