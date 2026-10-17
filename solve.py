@@ -2151,6 +2151,7 @@ def _run_single_task(
 
         else:
             # === Single-phase launch: no setup needed ===
+            logger.info("[%s] No setup required, launching agent...", task_name)
             docker_cmd[-1:-1] = ["--workdir", "/workspace"]  # insert before image_tag
             docker_cmd.extend(agent_cmd)
 
