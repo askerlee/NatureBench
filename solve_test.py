@@ -548,6 +548,55 @@ def test_wrapper_startup_honors_execution_overrides(monkeypatch, tmp_path, overr
         assert command[command.index("--force-fresh") + 1] == "task"
 
 
+@pytest.mark.parametrize("outcome", ["mixed", "success", "missing", "error", "interrupt", "dry-run"])
+def test_wrapper_saves_unsuccessful_tasks(monkeypatch, tmp_path, outcome):
+    import subprocess
+    from datetime import datetime
+
+    import run_naturebench as wrapper
+
+    tasks = tmp_path / "tasks.txt"
+    tasks.write_text("ok\nfailed\npending\nfailed\n")
+    out_dir = tmp_path / "out"
+    clock = Mock()
+    clock.now.return_value = datetime(2026, 10, 17, 9, 45)
+    monkeypatch.setattr(wrapper, "datetime", clock)
+
+    def execute(command, **kwargs):
+        if outcome not in {"missing", "dry-run"}:
+            write_json(out_dir / "run_summary.json", {"results": [
+                {"task_name": "ok", "status": "success"},
+                {"task_name": "failed", "status": "success" if outcome == "success" else "timeout"},
+                {"task_name": "pending", "status": "success" if outcome == "success" else "error"},
+                {"task_name": "unselected", "status": "error"},
+            ]})
+        if outcome == "error":
+            raise subprocess.CalledProcessError(1, command)
+        if outcome == "interrupt":
+            raise KeyboardInterrupt
+
+    monkeypatch.setattr(wrapper, "_run", execute)
+    monkeypatch.setattr(sys, "argv", [
+        "run_naturebench.py", "--tasks", str(tasks), "--skip-download",
+        "--out-dir", str(out_dir), "--force-fresh-task-file", "",
+    ] + (["--dry-run"] if outcome == "dry-run" else []))
+    if outcome in {"error", "interrupt"}:
+        exception = subprocess.CalledProcessError if outcome == "error" else KeyboardInterrupt
+        with pytest.raises(exception):
+            wrapper.main()
+    else:
+        wrapper.main()
+
+    retry_path = tmp_path / "force-fresh-2026101709.txt"
+    if outcome == "dry-run":
+        assert not retry_path.exists()
+    else:
+        expected = [] if outcome == "success" else ["failed", "pending"]
+        if outcome == "missing":
+            expected.insert(0, "ok")
+        assert retry_path.read_text().splitlines() == expected
+
+
 @pytest.mark.parametrize("rank,expected", [(0, ["c", "b"]), (1, ["a"])])
 @pytest.mark.parametrize("dry_run", [False, True])
 def test_wrapper_distributed_force_fresh(monkeypatch, tmp_path, rank, expected, dry_run):
@@ -582,6 +631,12 @@ def test_wrapper_distributed_force_fresh(monkeypatch, tmp_path, rank, expected, 
     assert download.call_args.args[3] == expected
     assert materialize.call_args.args[1] == expected
     assert len(commands) == 1
+    retry_files = list(tmp_path.glob("force-fresh-*.txt"))
+    if dry_run:
+        assert retry_files == []
+    else:
+        assert len(retry_files) == 1
+        assert retry_files[0].read_text().splitlines() == expected
 
 
 def test_wrapper_distributed_empty_rank(monkeypatch, tmp_path):

@@ -9,6 +9,7 @@ delegates execution to ``solve.py``.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import shlex
 import shutil
@@ -462,14 +463,31 @@ def main() -> None:
     print(f"Task packages: {tasks_dir}")
     print(f"Task-set: {task_set}")
     print(f"Output dir: {out_dir}")
-    if args.world_size > 1:
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", encoding="utf-8") as shard:
-            shard.write("\n".join(selected_tasks) + "\n")
-            shard.flush()
-            solve_cmd[solve_cmd.index("--task-set") + 1] = shard.name
+    try:
+        if args.world_size > 1:
+            with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", encoding="utf-8") as shard:
+                shard.write("\n".join(selected_tasks) + "\n")
+                shard.flush()
+                solve_cmd[solve_cmd.index("--task-set") + 1] = shard.name
+                _run(solve_cmd, cwd=root, dry_run=args.dry_run)
+        else:
             _run(solve_cmd, cwd=root, dry_run=args.dry_run)
-        return
-    _run(solve_cmd, cwd=root, dry_run=args.dry_run)
+    finally:
+        if not args.dry_run:
+            summary_path = out_dir / "run_summary.json"
+            try:
+                summary = json.loads(summary_path.read_text(encoding="utf-8"))
+            except FileNotFoundError:
+                summary = {}
+            successful = {
+                result["task_name"] for result in summary.get("results", [])
+                if result.get("status") == "success"
+            }
+            unsuccessful = [task for task in dict.fromkeys(selected_tasks) if task not in successful]
+            stamp = datetime.now().strftime("%Y%m%d%H")
+            retry_path = task_set.parent / f"force-fresh-{stamp}.txt"
+            retry_path.write_text("".join(f"{task}\n" for task in unsuccessful), encoding="utf-8")
+            print(f"Unsuccessful tasks: {len(unsuccessful)}; saved to {retry_path}", flush=True)
 
 
 if __name__ == "__main__":
