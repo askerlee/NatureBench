@@ -25,3 +25,4 @@ papers/*
 results/*
 *.log
 task-set/naturebench-25/all-2.txt
+results

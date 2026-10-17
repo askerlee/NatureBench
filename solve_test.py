@@ -530,6 +530,7 @@ def test_wrapper_startup_honors_execution_overrides(monkeypatch, tmp_path, overr
         "run_naturebench.py", "--tasks", str(tasks), "--data-dir", str(data),
         "--out-dir", str(tmp_path / "out"), "--skip-download", "--ensure-base-image",
         "--start-eval-services", "--eval-env-mapping", "unused",
+        "--force-fresh-task-file", "",
     ]
     if override == "forwarded":
         argv += ["--", "--force-fresh", "task"]
@@ -545,3 +546,73 @@ def test_wrapper_startup_honors_execution_overrides(monkeypatch, tmp_path, overr
     assert command[command.index("--task-set") + 1] == str(tasks)
     if override != "none":
         assert command[command.index("--force-fresh") + 1] == "task"
+
+
+@pytest.mark.parametrize("rank,expected", [(0, ["c", "b"]), (1, ["a"])])
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_wrapper_distributed_force_fresh(monkeypatch, tmp_path, rank, expected, dry_run):
+    import run_naturebench as wrapper
+
+    tasks = tmp_path / "tasks.txt"
+    tasks.write_text("old\na\nb\nc\n")
+    fresh = tmp_path / "fresh.txt"
+    fresh.write_text("# stable order\nc\na\nc\nb\n\n")
+    download = Mock()
+    materialize = Mock()
+    monkeypatch.setattr(wrapper, "_download_dataset", download)
+    monkeypatch.setattr(wrapper, "_materialize_archived_task_data", materialize)
+    commands = []
+
+    def capture(command, **kwargs):
+        shard = Path(command[command.index("--task-set") + 1])
+        assert shard.read_text().splitlines() == expected
+        start = command.index("--force-fresh") + 1
+        assert command[start:start + len(expected)] == expected
+        assert command[start + len(expected)].startswith("--")
+        assert kwargs["dry_run"] == dry_run
+        commands.append(command)
+
+    monkeypatch.setattr(wrapper, "_run", capture)
+    monkeypatch.setattr(sys, "argv", [
+        "run_naturebench.py", "--tasks", str(tasks),
+        "--force-fresh-task-file", str(fresh), "--world-size", "2", "--rank", str(rank),
+        "--out-dir", str(tmp_path / "out"),
+    ] + (["--dry-run"] if dry_run else []))
+    wrapper.main()
+    assert download.call_args.args[3] == expected
+    assert materialize.call_args.args[1] == expected
+    assert len(commands) == 1
+
+
+def test_wrapper_distributed_empty_rank(monkeypatch, tmp_path):
+    import run_naturebench as wrapper
+
+    tasks = tmp_path / "tasks.txt"
+    tasks.write_text("task\n")
+    monkeypatch.setattr(wrapper, "_download_dataset", Mock(side_effect=AssertionError("download")))
+    monkeypatch.setattr(wrapper, "_run", Mock(side_effect=AssertionError("startup")))
+    monkeypatch.setattr(sys, "argv", [
+        "run_naturebench.py", "--tasks", str(tasks),
+        "--force-fresh-task-file", str(tasks), "--world-size", "2", "--rank", "1",
+        "--ensure-base-image", "--start-eval-services",
+    ])
+    wrapper.main()
+
+
+@pytest.mark.parametrize("extra", [
+    ["--world-size", "0"], ["--rank", "-1"], ["--world-size", "2", "--rank", "2"],
+    ["--world-size", "2", "--resume-only"],
+    ["--world-size", "2", "--", "--task-set=other.txt"],
+])
+def test_wrapper_distributed_rejects_invalid_selection(monkeypatch, tmp_path, extra):
+    import run_naturebench as wrapper
+
+    tasks = tmp_path / "tasks.txt"
+    tasks.write_text("task\n")
+    monkeypatch.setattr(wrapper, "_download_dataset", Mock(side_effect=AssertionError("download")))
+    monkeypatch.setattr(sys, "argv", [
+        "run_naturebench.py", "--tasks", str(tasks), "--force-fresh-task-file", str(tasks),
+    ] + extra)
+    with pytest.raises(SystemExit) as error:
+        wrapper.main()
+    assert error.value.code == 2

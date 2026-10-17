@@ -15,6 +15,7 @@ import shutil
 import subprocess
 import sys
 import tarfile
+import tempfile
 from datetime import datetime
 from pathlib import Path
 
@@ -211,13 +212,17 @@ def main() -> None:
             "tasks are skipped by default but retained in cumulative results."
         ),
     )
-    run.add_argument("--out-dir", default="./results/codex_planning_25")
+    run.add_argument("--out-dir", default="./results/copilot_planning_25")
     run.add_argument("--dry-run", action="store_true", help="Print commands without running them.")
+    run.add_argument("--world-size", type=int, default=1,
+                     help="Number of nodes sharding the ordered force-fresh tasks.")
+    run.add_argument("--rank", type=int, default=0,
+                     help="Zero-based node rank; owns force-fresh indices modulo world-size.")
 
     agent = parser.add_argument_group("agent")
     agent.add_argument(
         "--agent",
-        default="codex-planning",
+        default="copilot-planning",
         help="Agent harness. Built-in: claude, codex, codex-planning, gemini, copilot, copilot-planning. Custom agents "
              "registered via the agent registry are also accepted (see "
              "docs/custom-agents.md). Required unless --download-only is used.",
@@ -312,6 +317,32 @@ def main() -> None:
         raise SystemExit(f"Task-set file not found: {task_set}")
     selected_tasks = _read_task_file(task_set)
 
+    if args.world_size < 1 or not 0 <= args.rank < args.world_size:
+        parser.error("--world-size must be positive and 0 <= --rank < --world-size.")
+    if args.force_fresh_task_file:
+        args.force_fresh.extend(_read_task_file(Path(args.force_fresh_task_file).expanduser()))
+    selection_overridden = any(
+        arg.split("=")[0] in {
+            "--task-set", "--out-dir", "--resume-tasks", "--resume-task-file",
+            "--resume-only", "--force-fresh", "--config",
+        }
+        for arg in (args.solve_args or [])
+    )
+    if args.world_size > 1:
+        if selection_overridden or args.resume_tasks or args.resume_task_file or args.resume_only:
+            parser.error("Multi-node force-fresh runs cannot use resume or forwarded selection overrides.")
+        selected_set = set(selected_tasks)
+        fresh_tasks = [task for task in dict.fromkeys(args.force_fresh) if task in selected_set]
+        selected_tasks = [
+            task for index, task in enumerate(fresh_tasks)
+            if index % args.world_size == args.rank
+        ]
+        args.force_fresh = selected_tasks.copy()
+        print(f"Rank {args.rank}/{args.world_size}: {len(selected_tasks)} of {len(fresh_tasks)} force-fresh task(s).")
+        if not selected_tasks:
+            print("No tasks assigned to this rank; exiting.")
+            return
+
     data_root = Path(args.data_dir).expanduser().resolve()
     if not args.skip_download:
         _download_dataset(args.dataset_id, data_root, args.dataset_revision, selected_tasks, args.dry_run)
@@ -336,17 +367,7 @@ def main() -> None:
         run_name = f"{args.agent}_{_slug(args.model)}_{_slug(task_line_for_name)}_{stamp}"
         out_dir = (root / "results" / run_name).resolve()
 
-    if args.force_fresh_task_file:
-        args.force_fresh.extend(_read_task_file(Path(args.force_fresh_task_file).expanduser()))
-
     needs_execution = True
-    selection_overridden = any(
-        arg.split("=")[0] in {
-            "--task-set", "--out-dir", "--resume-tasks", "--resume-task-file",
-            "--resume-only", "--force-fresh", "--config",
-        }
-        for arg in (args.solve_args or [])
-    )
     if (args.ensure_base_image or args.start_eval_services) and not selection_overridden:
         from solve import _select_execution_tasks
         resume_set = set(args.resume_tasks)
@@ -441,6 +462,13 @@ def main() -> None:
     print(f"Task packages: {tasks_dir}")
     print(f"Task-set: {task_set}")
     print(f"Output dir: {out_dir}")
+    if args.world_size > 1:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", encoding="utf-8") as shard:
+            shard.write("\n".join(selected_tasks) + "\n")
+            shard.flush()
+            solve_cmd[solve_cmd.index("--task-set") + 1] = shard.name
+            _run(solve_cmd, cwd=root, dry_run=args.dry_run)
+        return
     _run(solve_cmd, cwd=root, dry_run=args.dry_run)
 
 

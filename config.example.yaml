@@ -9,6 +9,8 @@ run:
   tasks: gpu_low
   out_dir: ./results/claude_<model-name>_gpu_low
   dry_run: false
+  world_size: 1
+  rank: 0
 
   agent: claude
   model: <model-name>

@@ -68,6 +68,42 @@ python run_naturebench.py \
   --skip-build
 ```
 
+### Multiple Workstations
+
+Use `--world-size` and zero-based `--rank` to shard force-fresh tasks across
+independent workstations. Pass the same task selection and ordered force-fresh
+list on every node. Explicit `--force-fresh` entries come before file entries;
+duplicates are removed and tasks outside `--tasks` are excluded before indexing.
+Each node runs tasks where `index % world_size == rank`.
+
+For example, on workstation A:
+
+```bash
+python run_naturebench.py \
+  --tasks ./task-set/naturebench-25/all.txt \
+  --force-fresh-task-file ./task-set/naturebench-25/force-fresh.txt \
+  --world-size 2 --rank 0 \
+  --agent copilot-planning --model <model-name> \
+  --out-dir ./results/run-rank0 \
+  --gpu-devices 0,1 --max-workers 2 \
+  --start-eval-services --eval-env-mapping ./eval_env_mapping.json \
+  --ensure-base-image
+```
+
+On workstation B, use `--rank 1` and `--out-dir ./results/run-rank1` with the
+same remaining settings. Adjust GPU IDs and worker counts for each machine.
+Each workstation needs its own environment, Docker setup, credentials, and
+evaluation service; omit `--start-eval-services` if its service is already running.
+
+Sharding happens before downloads and service startup. Empty ranks exit without
+starting anything. With `--world-size 1` (the default), normal full-selection
+behavior is unchanged. Multi-node mode selects **only assigned force-fresh
+tasks**; tasks outside the force-fresh list are not run or included in that
+rank's summary. Resume options and forwarded selection overrides are rejected.
+Keep outputs separate and collect per-case results afterward; summaries are not
+automatically merged. This distributes benchmark tasks, not a single task's
+training. `world_size` and `rank` can also be set in the YAML `run` section.
+
 ### Resume Runs
 
 If some task agents exit before completing the task, use the harness resume mechanism.
