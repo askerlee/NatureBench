@@ -518,6 +518,7 @@ def test_wrapper_download_reuses_prepared_tasks(monkeypatch, tmp_path, state):
 @pytest.mark.parametrize("override", ["none", "forwarded", "file"])
 def test_wrapper_startup_honors_execution_overrides(monkeypatch, tmp_path, override):
     import run_naturebench as wrapper
+    monkeypatch.setattr(wrapper, "_start_retry_tmux", Mock())
     tasks = tmp_path / "tasks.txt"
     tasks.write_text("task\n")
     data = tmp_path / "data"
@@ -548,6 +549,88 @@ def test_wrapper_startup_honors_execution_overrides(monkeypatch, tmp_path, overr
         assert command[command.index("--force-fresh") + 1] == "task"
 
 
+@pytest.mark.parametrize("contents", [
+    '# local keys\nNATBENCH_TEST_KEY="value with spaces ${UNEXPANDED}"\n',
+    "set -gx NATBENCH_TEST_KEY 'value with spaces ${UNEXPANDED}' # local key\n",
+])
+@pytest.mark.parametrize("existing", [None, "from-shell"])
+def test_wrapper_load_env(monkeypatch, tmp_path, contents, existing):
+    import run_naturebench as wrapper
+
+    path = tmp_path / ".env"
+    path.write_text(contents)
+    if existing is None:
+        monkeypatch.delenv("NATBENCH_TEST_KEY", raising=False)
+    else:
+        monkeypatch.setenv("NATBENCH_TEST_KEY", existing)
+    wrapper._load_env(path)
+    assert os.environ["NATBENCH_TEST_KEY"] == (
+        existing if existing is not None else "value with spaces ${UNEXPANDED}"
+    )
+
+
+def test_wrapper_load_env_missing(tmp_path):
+    import run_naturebench as wrapper
+
+    wrapper._load_env(tmp_path / ".env")
+
+
+def test_wrapper_load_env_at_startup(monkeypatch):
+    import run_naturebench as wrapper
+
+    load_env = Mock()
+    monkeypatch.setattr(wrapper, "_load_env", load_env)
+    monkeypatch.setattr(sys, "argv", ["run_naturebench.py", "--help"])
+    with pytest.raises(SystemExit) as error:
+        wrapper.main()
+    assert error.value.code == 0
+    load_env.assert_called_once_with(ROOT / ".env")
+
+
+@pytest.mark.parametrize("fresh_args", [
+    [],
+    ["--force-fresh-task-file", "old.txt"],
+    ["--force-fresh-task-file=old.txt"],
+    ["--force-fresh-task-file", "old.txt", "--force-fresh-task-file=other.txt"],
+])
+def test_wrapper_retry_tmux_command(monkeypatch, tmp_path, fresh_args):
+    import shlex
+
+    import run_naturebench as wrapper
+
+    retry_path = tmp_path / "task sets" / "force-fresh-2026101709.txt"
+    base_args = ["--tasks", "task set.txt", "--model", "test model"]
+    forwarded = ["--", "--timeout", "60"]
+    monkeypatch.setattr(sys, "argv", ["run_naturebench.py", *base_args, *fresh_args, *forwarded])
+    launch = Mock()
+    monkeypatch.setattr(wrapper.subprocess, "run", launch)
+    wrapper._start_retry_tmux(retry_path)
+
+    launch.assert_called_once()
+    command = launch.call_args.args[0]
+    assert command[:4] == ["tmux", "new-session", "-d", "-s"]
+    assert command[4].startswith("naturebench-retry-")
+    assert command[5:7] == ["-c", str(Path.cwd())]
+    assert shlex.split(command[7]) == [
+        sys.executable, str(ROOT / "run_naturebench.py"), *base_args,
+        "--force-fresh-task-file", str(retry_path), *forwarded,
+    ]
+    assert launch.call_args.kwargs == {"check": True}
+
+
+@pytest.mark.parametrize("failure", ["missing", "failed"])
+def test_wrapper_retry_tmux_failure(monkeypatch, tmp_path, capsys, failure):
+    import subprocess
+
+    import run_naturebench as wrapper
+
+    error = FileNotFoundError("tmux") if failure == "missing" else subprocess.CalledProcessError(1, ["tmux"])
+    monkeypatch.setattr(wrapper.subprocess, "run", Mock(side_effect=error))
+    monkeypatch.setattr(sys, "argv", ["run_naturebench.py"])
+    wrapper._start_retry_tmux(tmp_path / "force-fresh-2026101709.txt")
+    assert "Could not start retry tmux session" in capsys.readouterr().err
+
+
 @pytest.mark.parametrize("outcome", ["mixed", "success", "missing", "error", "interrupt", "dry-run"])
 def test_wrapper_saves_unsuccessful_tasks(monkeypatch, tmp_path, outcome):
     import subprocess
@@ -555,6 +638,8 @@ def test_wrapper_saves_unsuccessful_tasks(monkeypatch, tmp_path, outcome):
 
     import run_naturebench as wrapper
 
+    start_retry = Mock()
+    monkeypatch.setattr(wrapper, "_start_retry_tmux", start_retry)
     tasks = tmp_path / "tasks.txt"
     tasks.write_text("ok\nfailed\npending\nfailed\n")
     out_dir = tmp_path / "out"
@@ -590,11 +675,16 @@ def test_wrapper_saves_unsuccessful_tasks(monkeypatch, tmp_path, outcome):
     retry_path = tmp_path / "force-fresh-2026101709.txt"
     if outcome == "dry-run":
         assert not retry_path.exists()
+        start_retry.assert_not_called()
     else:
         expected = [] if outcome == "success" else ["failed", "pending"]
         if outcome == "missing":
             expected.insert(0, "ok")
         assert retry_path.read_text().splitlines() == expected
+        if expected:
+            start_retry.assert_called_once_with(retry_path)
+        else:
+            start_retry.assert_not_called()
 
 
 @pytest.mark.parametrize("rank,expected", [(0, ["c", "b"]), (1, ["a"])])
@@ -602,6 +692,7 @@ def test_wrapper_saves_unsuccessful_tasks(monkeypatch, tmp_path, outcome):
 def test_wrapper_distributed_force_fresh(monkeypatch, tmp_path, rank, expected, dry_run):
     import run_naturebench as wrapper
 
+    monkeypatch.setattr(wrapper, "_start_retry_tmux", Mock())
     tasks = tmp_path / "tasks.txt"
     tasks.write_text("old\na\nb\nc\n")
     fresh = tmp_path / "fresh.txt"

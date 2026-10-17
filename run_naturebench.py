@@ -18,12 +18,35 @@ import sys
 import tarfile
 import tempfile
 from datetime import datetime
+from io import StringIO
 from pathlib import Path
 
 from config_loader import load_yaml_config, merge_args_with_config
 
 
 DEFAULT_DATASET_ID = "FrontisAI/NatureBench"
+
+
+def _load_env(path: Path) -> None:
+    if not path.is_file():
+        return
+    from dotenv import dotenv_values
+
+    lines: list[str] = []
+    fish_values: dict[str, str] = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if line.lstrip().startswith("set -gx "):
+            tokens = shlex.split(line, comments=True)
+            if len(tokens) != 4:
+                raise ValueError("Expected set -gx NAME 'value' in .env")
+            fish_values[tokens[2]] = tokens[3]
+        else:
+            lines.append(line)
+    values = dotenv_values(stream=StringIO("\n".join(lines)), interpolate=False)
+    values.update(fish_values)
+    for name, value in values.items():
+        if value is not None:
+            os.environ.setdefault(name, value)
 
 
 def _run(cmd: list[str], *, cwd: Path, dry_run: bool = False) -> None:
@@ -172,8 +195,39 @@ def _explicit_arg_keys(argv: list[str]) -> set[str]:
     return keys
 
 
+def _start_retry_tmux(retry_path: Path) -> None:
+    original = sys.argv[1:]
+    boundary = original.index("--") if "--" in original else len(original)
+    retry_args: list[str] = []
+    index = 0
+    while index < boundary:
+        token = original[index]
+        if token == "--force-fresh-task-file":
+            index += 2
+            continue
+        if token.startswith("--force-fresh-task-file="):
+            index += 1
+            continue
+        retry_args.append(token)
+        index += 1
+    retry_args.extend(["--force-fresh-task-file", str(retry_path)])
+    retry_args.extend(original[boundary:])
+    command = [sys.executable, str(Path(__file__).resolve()), *retry_args]
+    session = f"naturebench-retry-{datetime.now().strftime('%Y%m%d%H')}-{os.getpid()}"
+    try:
+        subprocess.run(
+            ["tmux", "new-session", "-d", "-s", session, "-c", str(Path.cwd()), shlex.join(command)],
+            check=True,
+        )
+    except (OSError, subprocess.CalledProcessError) as exc:
+        print(f"Could not start retry tmux session: {exc}", file=sys.stderr, flush=True)
+    else:
+        print(f"Retry started in tmux session {session}; attach with: tmux attach -t {session}", flush=True)
+
+
 def main() -> None:
     root = Path(__file__).resolve().parent
+    _load_env(root / ".env")
     parser = argparse.ArgumentParser(
         description="Download NatureBench data if needed and launch solve.py.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
@@ -488,6 +542,8 @@ def main() -> None:
             retry_path = task_set.parent / f"force-fresh-{stamp}.txt"
             retry_path.write_text("".join(f"{task}\n" for task in unsuccessful), encoding="utf-8")
             print(f"Unsuccessful tasks: {len(unsuccessful)}; saved to {retry_path}", flush=True)
+            if unsuccessful:
+                _start_retry_tmux(retry_path)
 
 
 if __name__ == "__main__":
